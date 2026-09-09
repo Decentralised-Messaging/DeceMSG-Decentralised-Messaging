@@ -78,13 +78,13 @@ body {
     margin-bottom: 32px;
 }
 
-#login-form {
+#login-form, #register-form {
     display: flex;
     flex-direction: column;
     gap: 16px;
 }
 
-#login-form input {
+#login-form input, #register-form input {
     padding: 14px 16px;
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -92,21 +92,31 @@ body {
     transition: border-color 0.2s;
 }
 
-#login-form input:focus {
+#login-form input:focus, #register-form input:focus {
     outline: none;
     border-color: var(--primary);
 }
 
-.btn-primary {
-    padding: 14px 24px;
-    background: var(--primary);
-    color: var(--text-light);
-    border: none;
-    border-radius: 8px;
-    font-size: 16px;
+
+.auth-toggle {
+    margin-top: 16px;
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.auth-toggle a {
+    color: var(--primary);
+    text-decoration: none;
     font-weight: 600;
-    cursor: pointer;
-    transition: background 0.2s;
+}
+
+.auth-toggle a:hover {
+    text-decoration: underline;
+}
+
+.auth-form-title {
+    margin-bottom: 16px;
+    color: var(--text-primary);
 }
 
 .btn-primary:hover {
@@ -224,6 +234,36 @@ body {
 .chat-list {
     flex: 1;
     overflow-y: auto;
+}
+
+.sidebar-footer {
+    padding:12px 16px;
+    border-top:1px solid var(--border);
+    display:flex;
+    align-items:center;
+    gap:10px;
+}
+
+.sidebar-footer .sidebar-user {
+    flex:1;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    min-width:0;
+}
+
+.sidebar-footer .avatar {
+    width:36px;
+    height:36px;
+    flex-shrink:0;
+}
+
+#sidebar-user-name {
+    font-size:14px;
+    font-weight:500;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
 }
 
 .chat-item {

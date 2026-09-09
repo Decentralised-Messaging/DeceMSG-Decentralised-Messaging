@@ -61,6 +61,20 @@ class UserResponse(BaseModel):
         from_attributes = True
 
 
+class AuthConfigResponse(BaseModel):
+    """Public authentication configuration (safe for anonymous clients)."""
+    allow_public_registration: bool
+
+
+@router.get("/config", response_model=AuthConfigResponse)
+async def get_auth_config():
+    """Get public authentication settings (no auth required)."""
+    config = get_config()
+    return AuthConfigResponse(
+        allow_public_registration=config.auth.allow_public_registration,
+    )
+
+
 @router.post("/login", response_model=Token)
 @limiter.limit(get_login_rate_limit())
 async def login(

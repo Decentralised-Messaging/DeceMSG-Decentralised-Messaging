@@ -26,11 +26,26 @@
                     <p>Decentralized Messaging</p>
                 </div>
                 <form id="login-form">
-                    <input type="text" id="login-username" placeholder="Username" required>
-                    <input type="password" id="login-password" placeholder="Password" required>
+                    <input type="text" id="login-username" placeholder="Username" required autocomplete="username">
+                    <input type="password" id="login-password" placeholder="Password" required autocomplete="current-password">
                     <button type="submit" class="btn-primary">Login</button>
                 </form>
                 <p id="login-error" class="error hidden"></p>
+                <p id="register-toggle" class="auth-toggle hidden">
+                    <a href="#" id="btn-show-register">New here? Create an account</a>
+                </p>
+                <form id="register-form" class="hidden">
+                    <h3 class="auth-form-title">Create Account</h3>
+                    <input type="text" id="reg-username" placeholder="Username" required autocomplete="username">
+                    <input type="text" id="reg-display-name" placeholder="Display Name" required autocomplete="name">
+                    <input type="password" id="reg-password" placeholder="Password (min 6 characters)" required autocomplete="new-password">
+                    <input type="password" id="reg-password-confirm" placeholder="Confirm Password" required autocomplete="new-password">
+                    <button type="submit" class="btn-primary">Register</button>
+                </form>
+                <p id="register-error" class="error hidden"></p>
+                <p id="login-toggle" class="auth-toggle hidden">
+                    <a href="#" id="btn-show-login">Already have an account? Login</a>
+                </p>
             </div>
         </div>
 
@@ -50,6 +65,13 @@
                 </div>
                 <div id="chat-list" class="chat-list">
                     <!-- Chat items will be loaded here -->
+                </div>
+                <div class="sidebar-footer">
+                    <div class="sidebar-user">
+                        <div id="sidebar-user-avatar" class="avatar"></div>
+                        <span id="sidebar-user-name"></span>
+                    </div>
+                    <button id="btn-logout" class="icon-btn" title="Logout">⎋</button>
                 </div>
             </div>
 
@@ -376,13 +398,15 @@
                 </div>
                 <div class="modal-body">
                     <form id="create-user-form">
-                        <input type="text" id="new-user-username" placeholder="Username" required>
-                        <input type="text" id="new-user-display-name" placeholder="Display Name" required>
-                        <input type="password" id="new-user-password" placeholder="Password" required>
+                        <input type="text" id="new-user-username" placeholder="Username" required autocomplete="off">
+                        <input type="text" id="new-user-display-name" placeholder="Display Name" required autocomplete="off">
+                        <input type="password" id="new-user-password" placeholder="Password (min 6 characters)" required autocomplete="new-password">
+                        <input type="password" id="new-user-password-confirm" placeholder="Confirm Password" required autocomplete="new-password">
                         <label class="checkbox-label">
                             <input type="checkbox" id="new-user-is-admin">
                             Admin User
                         </label>
+                        <p id="create-user-error" class="error hidden"></p>
                         <button type="submit" class="btn-primary">Create</button>
                     </form>
                 </div>

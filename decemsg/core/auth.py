@@ -4,29 +4,35 @@ from typing import Optional
 
 from fastapi import Depends, HTTPException, status, WebSocket
 from fastapi.security import OAuth2PasswordBearer
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from decemsg.core.config import get_config
 from decemsg.core.database import get_db
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 # OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash."""
-    return pwd_context.verify(plain_password, hashed_password)
+    """Verify a password against its stored bcrypt hash."""
+    if not hashed_password:
+        return False
+    try:
+        return bcrypt.checkpw(
+            plain_password.encode("utf-8"), hashed_password.encode("utf-8")
+        )
+    except (ValueError, TypeError):
+        return False
 
 
 def get_password_hash(password: str) -> str:
-    """Hash a password."""
-    return pwd_context.hash(password)
+    """Hash a password using bcrypt."""
+    return bcrypt.hashpw(
+        password.encode("utf-8"), bcrypt.gensalt(rounds=12)
+    ).decode("utf-8")
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:

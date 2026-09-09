@@ -94,6 +94,23 @@ class DeceMSGApp {
             this.handleLogin();
         });
 
+        // Registration form
+        document.getElementById('register-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.handleRegister();
+        });
+
+        // Auth form toggles
+        document.getElementById('btn-show-register').addEventListener('click', (e) => {
+            e.preventDefault();
+            this.showRegisterForm();
+        });
+
+        document.getElementById('btn-show-login').addEventListener('click', (e) => {
+            e.preventDefault();
+            this.showLoginForm();
+        });
+
         // New chat button
         document.getElementById('btn-new-chat').addEventListener('click', () => {
             this.showNewChatModal();
@@ -102,6 +119,11 @@ class DeceMSGApp {
         // Settings button
         document.getElementById('btn-settings').addEventListener('click', () => {
             this.toggleAdminPanel();
+        });
+
+        // Logout button
+        document.getElementById('btn-logout').addEventListener('click', () => {
+            this.logout();
         });
 
         // Send message
@@ -335,6 +357,69 @@ class DeceMSGApp {
         }
     }
 
+    async handleRegister() {
+        const username = document.getElementById('reg-username').value.trim();
+        const displayName = document.getElementById('reg-display-name').value.trim();
+        const password = document.getElementById('reg-password').value;
+        const confirm = document.getElementById('reg-password-confirm').value;
+        const errorEl = document.getElementById('register-error');
+        const usernamePattern = /^[a-zA-Z0-9_]+$/;
+
+        errorEl.classList.add('hidden');
+
+        if (username.length < 3 || !usernamePattern.test(username)) {
+            errorEl.textContent = 'Username must be at least 3 characters and contain only letters, numbers, or underscores.';
+            errorEl.classList.remove('hidden');
+            return;
+        }
+        if (!displayName) {
+            errorEl.textContent = 'Display name is required.';
+            errorEl.classList.remove('hidden');
+            return;
+        }
+        if (password.length < 6) {
+            errorEl.textContent = 'Password must be at least 6 characters.';
+            errorEl.classList.remove('hidden');
+            return;
+        }
+        if (password !== confirm) {
+            errorEl.textContent = 'Passwords do not match.';
+            errorEl.classList.remove('hidden');
+            return;
+        }
+
+        try {
+            await this.apiCall('/auth/register', 'POST', {
+                username,
+                display_name: displayName,
+                password
+            });
+
+            // Auto-login for a seamless registration flow
+            const formData = new URLSearchParams();
+            formData.append('username', username);
+            formData.append('password', password);
+
+            const response = await fetch(`${this.apiBase}/auth/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: formData
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.detail || 'Login failed after registration');
+            }
+
+            this.token = data.access_token;
+            localStorage.setItem('token', this.token);
+            await this.loadCurrentUser();
+            this.showMainScreen();
+        } catch (error) {
+            errorEl.textContent = error.message;
+            errorEl.classList.remove('hidden');
+        }
+    }
+
     logout() {
         this.token = null;
         localStorage.removeItem('token');
@@ -351,6 +436,11 @@ class DeceMSGApp {
     async loadCurrentUser() {
         try {
             this.currentUser = await this.apiCall('/auth/me');
+            const sidebarName = document.getElementById('sidebar-user-name');
+            if (sidebarName) {
+                sidebarName.textContent = this.currentUser.display_name;
+                document.getElementById('sidebar-user-avatar').textContent = this.getInitials(this.currentUser.display_name);
+            }
             this.connectWebSocket();
             this.loadChats();
             
@@ -367,6 +457,46 @@ class DeceMSGApp {
     showLoginScreen() {
         document.getElementById('login-screen').classList.add('active');
         document.getElementById('main-screen').classList.remove('active');
+        this.checkPublicRegistration();
+    }
+
+    async checkPublicRegistration() {
+        const toggle = document.getElementById('register-toggle');
+        try {
+            const config = await this.apiCall('/auth/config');
+            const allowed = config.allow_public_registration;
+            toggle.classList.toggle('hidden', !allowed);
+            if (!allowed) {
+                this.showLoginForm();
+            }
+        } catch (error) {
+            console.error('Failed to check registration config:', error);
+            toggle.classList.add('hidden');
+        }
+    }
+
+    showRegisterForm() {
+        document.getElementById('login-form').classList.add('hidden');
+        document.getElementById('login-error').classList.add('hidden');
+        document.getElementById('register-toggle').classList.add('hidden');
+        document.getElementById('register-form').classList.remove('hidden');
+        document.getElementById('login-toggle').classList.remove('hidden');
+        document.getElementById('register-error').classList.add('hidden');
+        document.getElementById('login-username').value = '';
+        document.getElementById('login-password').value = '';
+    }
+
+    showLoginForm() {
+        document.getElementById('register-form').classList.add('hidden');
+        document.getElementById('login-toggle').classList.add('hidden');
+        document.getElementById('register-error').classList.add('hidden');
+        document.getElementById('login-form').classList.remove('hidden');
+        const allowed = !document.getElementById('register-toggle').classList.contains('hidden');
+        if (allowed) {
+            document.getElementById('register-toggle').classList.remove('hidden');
+        }
+        document.getElementById('reg-password').value = '';
+        document.getElementById('reg-password-confirm').value = '';
     }
 
     showMainScreen() {
@@ -1196,7 +1326,33 @@ class DeceMSGApp {
         const username = document.getElementById('new-user-username').value.trim();
         const displayName = document.getElementById('new-user-display-name').value.trim();
         const password = document.getElementById('new-user-password').value;
+        const confirmPassword = document.getElementById('new-user-password-confirm').value;
         const isAdmin = document.getElementById('new-user-is-admin').checked;
+        const errorEl = document.getElementById('create-user-error');
+
+        errorEl.classList.add('hidden');
+
+        const usernamePattern = /^[a-zA-Z0-9_]+$/;
+        if (username.length < 3 || !usernamePattern.test(username)) {
+            errorEl.textContent = 'Username must be at least 3 characters and contain only letters, numbers, or underscores.';
+            errorEl.classList.remove('hidden');
+            return;
+        }
+        if (!displayName) {
+            errorEl.textContent = 'Display name is required.';
+            errorEl.classList.remove('hidden');
+            return;
+        }
+        if (password.length < 6) {
+            errorEl.textContent = 'Password must be at least 6 characters.';
+            errorEl.classList.remove('hidden');
+            return;
+        }
+        if (password !== confirmPassword) {
+            errorEl.textContent = 'Passwords do not match.';
+            errorEl.classList.remove('hidden');
+            return;
+        }
 
         try {
             await this.apiCall('/users', 'POST', {
@@ -1209,7 +1365,8 @@ class DeceMSGApp {
             this.hideCreateUserModal();
             this.loadUsers();
         } catch (error) {
-            alert(error.message);
+            errorEl.textContent = error.message;
+            errorEl.classList.remove('hidden');
         }
     }
 
@@ -1233,11 +1390,13 @@ class DeceMSGApp {
 
     showCreateUserModal() {
         document.getElementById('create-user-modal').classList.remove('hidden');
+        document.getElementById('create-user-error').classList.add('hidden');
     }
 
     hideCreateUserModal() {
         document.getElementById('create-user-modal').classList.add('hidden');
         document.getElementById('create-user-form').reset();
+        document.getElementById('create-user-error').classList.add('hidden');
     }
 
     async loadAdminConfig() {
