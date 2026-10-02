@@ -6,7 +6,10 @@ federation authentication, authorization, replay, and injection tests.
 
 from pathlib import Path
 
+import pytest
 
+
+@pytest.mark.security
 def test_no_private_key_material_is_checked_in() -> None:
     root = Path(__file__).resolve().parents[2]
     forbidden_suffixes = {
