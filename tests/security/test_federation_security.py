@@ -614,3 +614,127 @@ def test_typing_indicator_cannot_claim_another_domain() -> None:
     with pytest.raises(Exception) as exc:
         asyncio.run(receive_typing_indicator(typing, AsyncMock(), auth))
     assert getattr(exc.value, "status_code", None) == 403
+
+from decemsg.models.federated_event import FederatedEventState
+
+
+def _valid_event_payload(*, event_id: str, created_at: str, sequence: int = 0) -> dict:
+    from decemsg.core.config import get_config
+
+    domain = get_config().server.domain
+    return {
+        "event_id": event_id,
+        "event_type": "message",
+        "protocol_version": "1",
+        "origin_server": "remote.example",
+        "origin_key_id": "remote-key",
+        "actor_identity": "alice#remote.example",
+        "target_identity": f"bob#{domain}",
+        "conversation_id": "chat-1",
+        "created_at": created_at,
+        "sequence": sequence,
+        "message_type": "text",
+        "ciphertext": "opaque-ciphertext",
+        "signature": "valid",
+    }
+
+
+@pytest.mark.security
+def test_duplicate_signed_event_is_idempotent(monkeypatch) -> None:
+    import decemsg.federation as federation_module
+
+    monkeypatch.setattr(federation_module, "verify_event_signature", lambda *_args: True)
+    event = _valid_event_payload(
+        event_id="event-duplicate",
+        created_at=datetime.utcnow().isoformat(),
+    )
+    message = IncomingMessage(
+        from_user="alice",
+        from_domain="remote.example",
+        to_user="bob",
+        content="opaque-ciphertext",
+        event=event,
+    )
+    auth = AuthResult(
+        is_authenticated=True,
+        server_domain="remote.example",
+        key_id="remote-key",
+        public_key="pem",
+    )
+    existing = SimpleNamespace(event_id="event-duplicate")
+    db = AsyncMock()
+    db.execute.return_value = SimpleNamespace(
+        scalar_one_or_none=lambda: existing
+    )
+
+    result = asyncio.run(receive_message(message, db, auth))
+
+    assert result == {"status": "duplicate", "event_id": "event-duplicate"}
+    db.add.assert_not_called()
+    db.flush.assert_not_called()
+
+
+@pytest.mark.security
+def test_stale_signed_event_is_rejected(monkeypatch) -> None:
+    import decemsg.federation as federation_module
+
+    from datetime import timedelta
+
+    monkeypatch.setattr(federation_module, "verify_event_signature", lambda *_args: True)
+    event = _valid_event_payload(
+        event_id="event-stale",
+        created_at=(datetime.utcnow() - timedelta(minutes=6)).isoformat(),
+    )
+    message = IncomingMessage(
+        from_user="alice",
+        from_domain="remote.example",
+        to_user="bob",
+        content="opaque-ciphertext",
+        event=event,
+    )
+    auth = AuthResult(
+        is_authenticated=True,
+        server_domain="remote.example",
+        key_id="remote-key",
+        public_key="pem",
+    )
+
+    with pytest.raises(Exception) as exc:
+        asyncio.run(receive_message(message, AsyncMock(), auth))
+    assert getattr(exc.value, "status_code", None) == 400
+
+
+@pytest.mark.security
+def test_positive_sequence_regression_is_rejected(monkeypatch) -> None:
+    import decemsg.federation as federation_module
+
+    monkeypatch.setattr(federation_module, "verify_event_signature", lambda *_args: True)
+    event = _valid_event_payload(
+        event_id="event-regression",
+        created_at=datetime.utcnow().isoformat(),
+        sequence=1,
+    )
+    message = IncomingMessage(
+        from_user="alice",
+        from_domain="remote.example",
+        to_user="bob",
+        content="opaque-ciphertext",
+        event=event,
+    )
+    auth = AuthResult(
+        is_authenticated=True,
+        server_domain="remote.example",
+        key_id="remote-key",
+        public_key="pem",
+    )
+    latest = SimpleNamespace(sequence=2)
+    db = AsyncMock()
+    db.execute.side_effect = [
+        SimpleNamespace(scalar_one_or_none=lambda: None),
+        SimpleNamespace(scalar_one_or_none=lambda: latest),
+    ]
+
+    with pytest.raises(Exception) as exc:
+        asyncio.run(receive_message(message, db, auth))
+    assert getattr(exc.value, "status_code", None) == 409
+    db.add.assert_not_called()
