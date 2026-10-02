@@ -67,6 +67,7 @@ await alice.markRequestAsSent(
       "@bob:example.com": {
         BOB_DEVICE: bobUploadBody.device_keys,
         BOB_DEVICE_2: bobSecondUploadBody.device_keys,
+        CHARLIE_DEVICE: charlieUploadBody.device_keys,
       },
     },
     failures: {},
@@ -98,6 +99,20 @@ await alice.markRequestAsSent(
       "@bob:example.com": oneTimeKeys,
     },
     failures: {},
+  }),
+);
+
+const charlieRequests = await charlie.outgoingRequests();
+const charlieUpload = charlieRequests.find((request) => request instanceof KeysUploadRequest);
+if (!charlieUpload) throw new Error("Charlie's device did not produce a keys upload request");
+const charlieUploadBody = JSON.parse(charlieUpload.body);
+await charlie.markRequestAsSent(
+  charlieUpload.id,
+  charlieUpload.type,
+  JSON.stringify({
+    one_time_key_counts: {
+      signed_curve25519: Object.keys(charlieUploadBody.one_time_keys).length,
+    },
   }),
 );
 
@@ -146,6 +161,7 @@ for (const request of keyShareRequests) {
   for (const [deviceId, machine] of [
     ["BOB_DEVICE", bob],
     ["BOB_DEVICE_2", bobSecond],
+    ["CHARLIE_DEVICE", charlie],
   ]) {
     const rawContent = body.messages["@bob:example.com"][deviceId];
     if (!rawContent) throw new Error("Room-key share did not target " + deviceId);
@@ -201,15 +217,85 @@ for (const [deviceId, machine] of [
 
 
 
-try {
-  await charlie.decryptRoomEvent(
-    encryptedEvent,
-    room,
+const rotatedRoom = new RoomId("!decemsg-smoke-1:example.com");
+for (const machine of [alice, bob, bobSecond]) {
+  const settings = new RoomSettings();
+  settings.algorithm = EncryptionAlgorithm.MegolmV1AesSha2;
+  settings.onlyAllowTrustedDevices = false;
+  await machine.setRoomSettings(rotatedRoom, settings);
+}
+
+const rotatedKeyRequests = await alice.shareRoomKey(
+  rotatedRoom,
+  [new UserId("@bob:example.com")],
+  new EncryptionSettings(),
+);
+
+for (const request of rotatedKeyRequests) {
+  const body = JSON.parse(request.body);
+  for (const [deviceId, machine] of [
+    ["BOB_DEVICE", bob],
+    ["BOB_DEVICE_2", bobSecond],
+  ]) {
+    const rawContent = body.messages["@bob:example.com"][deviceId];
+    if (!rawContent) throw new Error("Rotated room key did not target " + deviceId);
+    const content = typeof rawContent === "string" ? JSON.parse(rawContent) : rawContent;
+    const processed = await machine.receiveSyncChanges(
+      JSON.stringify([{
+        sender: "@alice:example.com",
+        type: String(request.event_type),
+        content,
+      }]),
+      new DeviceLists(),
+      new Map(),
+    );
+    if (
+      processed.length !== 1 ||
+      processed[0].type !== ProcessedToDeviceEventType.Decrypted
+    ) {
+      throw new Error(deviceId + " did not decrypt the rotated room-key event");
+    }
+  }
+}
+
+const rotatedEncryptedContent = await alice.encryptRoomEvent(
+  rotatedRoom,
+  "m.room.message",
+  JSON.stringify({ msgtype: "m.text", body: "Rotated E2EE message" }),
+);
+const rotatedEncryptedEvent = JSON.stringify({
+  type: "m.room.encrypted",
+  event_id: "$rotated:example.com",
+  origin_server_ts: Date.now(),
+  sender: "@alice:example.com",
+  content: JSON.parse(rotatedEncryptedContent),
+  unsigned: { age: 0 },
+});
+
+for (const [deviceId, machine] of [
+  ["BOB_DEVICE", bob],
+  ["BOB_DEVICE_2", bobSecond],
+]) {
+  const decrypted = await machine.decryptRoomEvent(
+    rotatedEncryptedEvent,
+    rotatedRoom,
     new DecryptionSettings(),
   );
-  throw new Error("Unauthorized Charlie device decrypted Alice's ciphertext");
+  const clearEvent = JSON.parse(decrypted.event);
+  if (clearEvent.content?.body !== "Rotated E2EE message") {
+    throw new Error(deviceId + " failed to decrypt the rotated ciphertext");
+  }
+}
+
+try {
+  await charlie.decryptRoomEvent(
+    rotatedEncryptedEvent,
+    rotatedRoom,
+    new DecryptionSettings(),
+  );
+  throw new Error("Revoked Charlie device decrypted ciphertext from the rotated room epoch");
 } catch (error) {
   if (error?.code === undefined) throw error;
 }
 
-console.log("Alice encrypted, Bob decrypted, and an unauthorized Charlie device was rejected.");
+console.log("Alice encrypted, two authorized Bob devices decrypted, and a revoked device was excluded after room-key rotation.");
