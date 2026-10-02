@@ -19,6 +19,9 @@ from decemsg.federation.auth_middleware import FederationAuthMiddleware
 from decemsg.main import app
 from decemsg.federation.server_auth import (
     ServerKeyManager,
+    ServerTrustStore,
+    get_trust_store,
+    reset_trust_store,
     verify_authenticated_request,
 )
 
@@ -93,10 +96,13 @@ def _signed_headers(
 
     payload += hashlib.sha256(body.encode()).hexdigest()
     signature = manager.sign_data(payload)
+    reset_trust_store()
+    get_trust_store().add_key(domain, manager.get_public_key_pem())
     return {
         "X-Server-Signature": signature,
         "X-Server-Timestamp": str(timestamp),
         "X-Server-Public-Key": manager.get_public_key_pem(),
+        "X-Server-Key-ID": manager.get_key_id(),
         "X-Server-Domain": domain,
     }
 
@@ -249,6 +255,112 @@ def test_missing_federation_credentials_fail_closed() -> None:
         is False
     )
 
+
+
+@pytest.mark.security
+def test_self_asserted_server_key_cannot_claim_a_trusted_domain(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """A key is accepted only when explicitly bound to the claimed domain."""
+    monkeypatch.chdir(tmp_path)
+    reset_trust_store()
+    manager = ServerKeyManager()
+    headers = _signed_headers(manager, domain="trusted.example")
+    headers["X-Server-Domain"] = "other.example"
+
+    assert not verify_authenticated_request(
+        method="POST",
+        path="/federation/messages",
+        body="{}",
+        headers=headers,
+        server_domain="trusted.example",
+    )
+
+
+@pytest.mark.security
+def test_untrusted_key_is_rejected_even_with_a_valid_signature(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Possession of a signing key is not sufficient to establish trust."""
+    monkeypatch.chdir(tmp_path)
+    reset_trust_store()
+    manager = ServerKeyManager()
+    timestamp = int(time.time())
+    body = "{}"
+    path = "/federation/messages"
+    import hashlib
+    payload = f"POST:{path}:{timestamp}:{hashlib.sha256(body.encode()).hexdigest()}"
+    headers = {
+        "X-Server-Signature": manager.sign_data(payload),
+        "X-Server-Timestamp": str(timestamp),
+        "X-Server-Public-Key": manager.get_public_key_pem(),
+        "X-Server-Key-ID": manager.get_key_id(),
+        "X-Server-Domain": "untrusted.example",
+    }
+
+    assert not verify_authenticated_request(
+        method="POST",
+        path=path,
+        body=body,
+        headers=headers,
+    )
+
+
+@pytest.mark.security
+def test_trusted_key_rotation_accepts_new_key_and_rejects_revoked_old_key(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Multiple pinned keys permit controlled rotation and revocation."""
+    monkeypatch.chdir(tmp_path)
+    store = ServerTrustStore()
+    old_manager = ServerKeyManager()
+    old_record = store.add_key("remote.example", old_manager.get_public_key_pem())
+    new_manager = ServerKeyManager()
+    new_record = store.add_key("remote.example", new_manager.get_public_key_pem())
+
+    assert old_record.key_id != new_record.key_id
+    assert store.is_trusted("remote.example", old_record.key_id, old_record.public_key_pem)
+    assert store.is_trusted("remote.example", new_record.key_id, new_record.public_key_pem)
+
+    assert store.revoke_key("remote.example", old_record.key_id)
+    assert not store.is_trusted("remote.example", old_record.key_id, old_record.public_key_pem)
+    assert store.is_trusted("remote.example", new_record.key_id, new_record.public_key_pem)
+
+
+@pytest.mark.security
+def test_expired_or_not_yet_valid_trusted_key_is_rejected(tmp_path, monkeypatch) -> None:
+    """Trust records enforce their validity window."""
+    from datetime import datetime, timedelta
+
+    monkeypatch.chdir(tmp_path)
+    manager = ServerKeyManager()
+    store = ServerTrustStore()
+    now = datetime.utcnow()
+    record = store.add_key(
+        "remote.example",
+        manager.get_public_key_pem(),
+        not_before=now + timedelta(minutes=1),
+        expires_at=now + timedelta(minutes=2),
+    )
+
+    assert not store.is_trusted(
+        "remote.example", record.key_id, record.public_key_pem, now=now
+    )
+    assert store.is_trusted(
+        "remote.example",
+        record.key_id,
+        record.public_key_pem,
+        now=now + timedelta(minutes=1, seconds=1),
+    )
+    assert not store.is_trusted(
+        "remote.example",
+        record.key_id,
+        record.public_key_pem,
+        now=now + timedelta(minutes=2),
+    )
 
 
 @pytest.mark.security
