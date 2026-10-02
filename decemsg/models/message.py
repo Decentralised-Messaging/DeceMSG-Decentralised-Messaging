@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 from enum import Enum as PyEnum
-from sqlalchemy import String, DateTime, ForeignKey, Enum, Text, Integer, Boolean
+from sqlalchemy import String, DateTime, ForeignKey, Enum, Text, Integer, Boolean, CheckConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from decemsg.core.database import Base
@@ -20,6 +20,12 @@ class Message(Base):
     """Message model for chat messages."""
     
     __tablename__ = "messages"
+    __table_args__ = (
+        CheckConstraint(
+            "(sender_id IS NULL) OR (sender_federated_identity_id IS NULL)",
+            name="ck_message_one_sender_identity",
+        ),
+    )
     
     id: Mapped[str] = mapped_column(
         String(36), 
@@ -31,10 +37,16 @@ class Message(Base):
         ForeignKey("chats.id", ondelete="CASCADE"),
         nullable=False
     )
-    sender_id: Mapped[str] = mapped_column(
-        String(36), 
+    sender_id: Mapped[str | None] = mapped_column(
+        String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True
+        nullable=True,
+    )
+    sender_federated_identity_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("federated_identities.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     message_type: Mapped[MessageType] = mapped_column(
@@ -78,10 +90,15 @@ class Message(Base):
     
     # Relationships
     chat: Mapped["Chat"] = relationship("Chat", back_populates="messages")
-    sender: Mapped["User"] = relationship(
+    sender: Mapped["User | None"] = relationship(
         "User",
         back_populates="sent_messages",
-        foreign_keys=[sender_id]
+        foreign_keys=[sender_id],
+    )
+    sender_federated_identity: Mapped["FederatedIdentity | None"] = relationship(
+        "FederatedIdentity",
+        back_populates="messages",
+        foreign_keys=[sender_federated_identity_id],
     )
     reactions: Mapped[list["MessageReaction"]] = relationship(
         "MessageReaction",
@@ -100,6 +117,7 @@ class Message(Base):
             "id": self.id,
             "chat_id": self.chat_id,
             "sender_id": self.sender_id,
+            "sender_federated_identity_id": self.sender_federated_identity_id,
             "content": self.content,
             "message_type": self.message_type.value,
             "file_url": self.file_url,
@@ -137,6 +155,14 @@ class Message(Base):
                 "display_name": self.sender.display_name,
                 "avatar_url": self.sender.avatar_url,
                 "domain": self.sender.domain,
+            }
+        elif self.sender_federated_identity:
+            data["sender"] = {
+                "id": self.sender_federated_identity.id,
+                "username": self.sender_federated_identity.username,
+                "display_name": self.sender_federated_identity.display_name,
+                "avatar_url": self.sender_federated_identity.avatar_url,
+                "domain": self.sender_federated_identity.domain,
             }
         
         return data
@@ -187,3 +213,4 @@ class MessageReaction(Base):
 # Import at bottom to avoid circular imports
 from decemsg.models.user import User
 from decemsg.models.chat import Chat
+from decemsg.models.federated_identity import FederatedIdentity
