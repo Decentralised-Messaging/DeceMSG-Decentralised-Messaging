@@ -214,3 +214,32 @@ def test_successful_password_change_preserves_session(monkeypatch) -> None:
     assert result["message"] == "Password changed successfully"
     assert user.password_hash == "hash:new-password"
     assert session.revoked_at is None
+
+
+
+@pytest.mark.security
+def test_user_identity_and_device_models_define_stable_security_metadata() -> None:
+    """Identity and device records expose stable, lifecycle-aware metadata."""
+    from decemsg.models.device import Device, DeviceStatus
+    from decemsg.models.identity import UserIdentity
+
+    identity = UserIdentity(
+        id="identity-1",
+        user_id="user-1",
+        username="alice",
+        domain="example.com",
+    )
+    device = Device(
+        id="device-1",
+        user_id="user-1",
+        name="Alice Laptop",
+        platform="web",
+        public_identity_key="public-key-material",
+    )
+
+    assert identity.username == "alice"
+    assert identity.domain == "example.com"
+    assert device.id == "device-1"
+    assert device.status == DeviceStatus.ACTIVE
+    assert device.public_identity_key == "public-key-material"
+    assert "id" in Device.__table__.primary_key.columns.keys()
