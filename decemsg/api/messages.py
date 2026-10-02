@@ -234,9 +234,9 @@ async def send_message(
     )
     
     db.add(message)
-    await db.commit()
+    await db.flush()
     
-    # Reload message with relationships
+    # Build the federation outbox entries in the same transaction as the message.
     result = await db.execute(
         select(Message)
         .options(selectinload(Message.reactions), selectinload(Message.sender))
@@ -244,9 +244,11 @@ async def send_message(
     )
     message = result.scalar_one()
     
-    # Prepare response
+    # Prepare response after the outbox entries are added.
     message_dict = message.to_dict()
-    
+
+    await db.commit()
+
     # Broadcast to chat members via WebSocket
     broadcast_message = {
         "type": "new_message",
@@ -260,13 +262,12 @@ async def send_message(
     # Also send to sender for confirmation
     await manager.send_personal_message(broadcast_message, current_user.id)
     
-    # Route to federated members if any
+    # Route to federated members by adding durable outbox jobs before commit.
     for member in chat.members:
         if member.user_id != current_user.id and is_federated_user(member.user_id):
             from_username, from_domain = parse_user_id(current_user.id)
             to_username, to_domain = parse_user_id(member.user_id)
-            config = get_config()
-            
+
             from decemsg.federation.federation_client import route_message
             result = await route_message(
                 from_user=current_user.id,
@@ -277,7 +278,20 @@ async def send_message(
                 db=db,
             )
             if result:
-                logger.info(f"Federated message sent from {from_username}@{from_domain} to {to_username}@{to_domain}")
+                logger.info(
+                    f"Federated message queued from {from_username}@{from_domain} "
+                    f"to {to_username}@{to_domain}"
+                )
+
+    await db.commit()
+
+    # Broadcast only after the message and outbox transaction is durable.
+    await manager.broadcast_to_chat(
+        broadcast_message, chat_id, exclude_user=current_user.id
+    )
+    
+    # Also send to sender for confirmation
+    await manager.send_personal_message(broadcast_message, current_user.id)
     
     return MessageResponse(**message_dict)
 
