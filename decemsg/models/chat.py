@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 from enum import Enum as PyEnum
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, Enum, Text
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, Enum, Text, CheckConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from decemsg.core.database import Base
@@ -97,6 +97,16 @@ class ChatMember(Base):
     """ChatMember model for user-chat relationships."""
     
     __tablename__ = "chat_members"
+    __table_args__ = (
+        CheckConstraint(
+            "(user_id IS NOT NULL) OR (federated_identity_id IS NOT NULL)",
+            name="ck_chat_member_has_identity",
+        ),
+        CheckConstraint(
+            "NOT (user_id IS NOT NULL AND federated_identity_id IS NOT NULL)",
+            name="ck_chat_member_one_identity",
+        ),
+    )
     
     id: Mapped[str] = mapped_column(
         String(36), 
@@ -108,10 +118,16 @@ class ChatMember(Base):
         ForeignKey("chats.id", ondelete="CASCADE"),
         nullable=False
     )
-    user_id: Mapped[str] = mapped_column(
-        String(36), 
+    user_id: Mapped[str | None] = mapped_column(
+        String(36),
         ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False
+        nullable=True,
+    )
+    federated_identity_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("federated_identities.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
     role: Mapped[MemberRole] = mapped_column(
         Enum(MemberRole),
@@ -131,7 +147,11 @@ class ChatMember(Base):
     
     # Relationships
     chat: Mapped["Chat"] = relationship("Chat", back_populates="members")
-    user: Mapped["User"] = relationship("User", back_populates="chat_memberships")
+    user: Mapped["User | None"] = relationship("User", back_populates="chat_memberships")
+    federated_identity: Mapped["FederatedIdentity | None"] = relationship(
+        "FederatedIdentity",
+        back_populates="chat_memberships",
+    )
     
     def to_dict(self) -> dict:
         """Convert chat member to dictionary."""
@@ -139,13 +159,22 @@ class ChatMember(Base):
             "id": self.id,
             "chat_id": self.chat_id,
             "user_id": self.user_id,
+            "federated_identity_id": self.federated_identity_id,
             "role": self.role.value,
             "joined_at": self.joined_at.isoformat() if self.joined_at else None,
             "last_read_message_id": self.last_read_message_id,
             "user": self.user.to_dict() if self.user else None,
+            "federated_identity": {
+                "id": self.federated_identity.id,
+                "username": self.federated_identity.username,
+                "domain": self.federated_identity.domain,
+                "display_name": self.federated_identity.display_name,
+                "avatar_url": self.federated_identity.avatar_url,
+            } if self.federated_identity else None,
         }
 
 
 # Import at bottom to avoid circular imports
 from decemsg.models.user import User
 from decemsg.models.message import Message
+from decemsg.models.federated_identity import FederatedIdentity
