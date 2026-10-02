@@ -91,7 +91,9 @@ def _signed_headers(
     body = "{}"
     path = "/federation/messages"
     method = "POST"
-    payload = f"{method}:{path}:{timestamp}:"
+    request_id = "test-request-id"
+    key_id = manager.get_key_id()
+    payload = f"{method}:{path}:{timestamp}:{request_id}:{domain}:{key_id}:"
     import hashlib
 
     payload += hashlib.sha256(body.encode()).hexdigest()
@@ -101,8 +103,9 @@ def _signed_headers(
     return {
         "X-Server-Signature": signature,
         "X-Server-Timestamp": str(timestamp),
+        "X-Server-Request-ID": request_id,
         "X-Server-Public-Key": manager.get_public_key_pem(),
-        "X-Server-Key-ID": manager.get_key_id(),
+        "X-Server-Key-ID": key_id,
         "X-Server-Domain": domain,
     }
 
@@ -243,6 +246,38 @@ def test_stale_federation_request_is_rejected(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.security
+def test_missing_request_id_fails_closed(tmp_path, monkeypatch) -> None:
+    """Signed requests without a replay-protection identifier are rejected."""
+    monkeypatch.chdir(tmp_path)
+    manager = ServerKeyManager()
+    headers = _signed_headers(manager)
+    headers.pop("X-Server-Request-ID")
+
+    assert not verify_authenticated_request(
+        method="POST",
+        path="/federation/messages",
+        body="{}",
+        headers=headers,
+    )
+
+
+@pytest.mark.security
+def test_signed_security_fields_cannot_be_tampered(tmp_path, monkeypatch) -> None:
+    """Changing domain or key ID after signing invalidates authentication."""
+    monkeypatch.chdir(tmp_path)
+    manager = ServerKeyManager()
+    headers = _signed_headers(manager)
+    headers["X-Server-Key-ID"] = "sha256:tampered"
+
+    assert not verify_authenticated_request(
+        method="POST",
+        path="/federation/messages",
+        body="{}",
+        headers=headers,
+    )
+
+
+@pytest.mark.security
 def test_missing_federation_credentials_fail_closed() -> None:
     """Missing authentication material must never be treated as anonymous trust."""
     assert (
@@ -366,10 +401,6 @@ def test_expired_or_not_yet_valid_trusted_key_is_rejected(tmp_path, monkeypatch)
 
 
 @pytest.mark.security
-@pytest.mark.xfail(
-    strict=True,
-    reason="TASK-020 must reject duplicate event IDs/idempotently replayed events.",
-)
 def test_replayed_valid_federation_request_is_rejected(
     tmp_path,
     monkeypatch,
