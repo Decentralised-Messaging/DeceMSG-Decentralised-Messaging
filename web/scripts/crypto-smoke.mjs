@@ -117,7 +117,7 @@ for (const request of keyShareRequests) {
   const content = body.messages["@bob:example.com"]["BOB_DEVICE"];
   if (!content) throw new Error("Room-key share did not target Bob");
 
-  await bob.receiveSyncChanges(
+  const processed = await bob.receiveSyncChanges(
     JSON.stringify([
       {
         sender: "@alice:example.com",
@@ -128,6 +128,7 @@ for (const request of keyShareRequests) {
     new DeviceLists(),
     new Map(),
   );
+  console.log("processed room-key events:", processed.map((item) => item.type));
 }
 
 const encryptedContent = await alice.encryptRoomEvent(
@@ -142,11 +143,17 @@ const encryptedEvent = JSON.stringify({
   content: JSON.parse(encryptedContent),
 });
 
-const decrypted = await bob.decryptRoomEvent(
-  encryptedEvent,
-  room,
-  new DecryptionSettings(),
-);
+let decrypted;
+try {
+  decrypted = await bob.decryptRoomEvent(
+    encryptedEvent,
+    room,
+    new DecryptionSettings(),
+  );
+} catch (error) {
+  console.error("room decrypt failed:", error?.name, error?.message, error?.code);
+  throw error;
+}
 
 const clearEvent = JSON.parse(decrypted.clearEvent);
 if (clearEvent.content?.body !== "DeceMSG E2EE smoke test") {
