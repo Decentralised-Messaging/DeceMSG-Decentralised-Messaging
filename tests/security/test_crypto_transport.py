@@ -5,6 +5,7 @@ import pytest
 from decemsg.api.crypto import CryptoRequest, _matrix_user_id
 from decemsg.main import app
 from decemsg.models.crypto import CryptoDeviceState, CryptoToDeviceMessage
+from decemsg.api.messages import MessageCreate
 
 
 @pytest.mark.security
@@ -50,3 +51,9 @@ def test_matrix_user_id_uses_canonical_server_identity() -> None:
         domain = "example.com"
 
     assert _matrix_user_id(UserStub()) == "@alice:example.com"
+
+
+@pytest.mark.security
+def test_message_creation_contract_requires_ciphertext() -> None:
+    request = MessageCreate(content="plaintext")
+    assert request.encrypted_content is None
