@@ -24,6 +24,7 @@ from decemsg.api import (
     websocket_router,
 )
 from decemsg.federation import router as federation_router
+from decemsg.federation.auth_middleware import FederationAuthMiddleware
 
 
 # Determine UI directory
@@ -63,6 +64,9 @@ def create_app() -> FastAPI:
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
     
+    # Federation authentication must wrap every non-public federation route.
+    app.add_middleware(FederationAuthMiddleware)
+
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
