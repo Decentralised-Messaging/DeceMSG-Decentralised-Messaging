@@ -615,8 +615,6 @@ def test_typing_indicator_cannot_claim_another_domain() -> None:
         asyncio.run(receive_typing_indicator(typing, AsyncMock(), auth))
     assert getattr(exc.value, "status_code", None) == 403
 
-from decemsg.models.federated_event import FederatedEventState
-
 
 def _valid_event_payload(*, event_id: str, created_at: str, sequence: int = 0) -> dict:
     from decemsg.core.config import get_config
