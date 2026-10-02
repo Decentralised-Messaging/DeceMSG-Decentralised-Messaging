@@ -583,12 +583,19 @@ class DeceMSGApp {
         return '!' + chat.id + '-' + epoch + ':' + this.currentUser.domain;
     }
 
-    async recipientMatrixUserId(chat) {
-        const other = chat.members.find(member => member.user_id !== this.currentUser.id);
-        if (!other?.user) {
-            throw new Error('E2EE currently requires a local direct-chat recipient');
+    async recipientMatrixUserIds(chat) {
+        const recipients = [];
+        for (const member of chat.members) {
+            if (member.user_id === this.currentUser.id) continue;
+            if (!member.user) {
+                throw new Error('E2EE group messaging currently requires all members to be local devices');
+            }
+            recipients.push('@' + member.user.username + ':' + member.user.domain);
         }
-        return '@' + other.user.username + ':' + other.user.domain;
+        if (!recipients.length) {
+            throw new Error('E2EE chat has no recipient devices');
+        }
+        return recipients;
     }
 
     async handleRegister() {
@@ -1196,11 +1203,11 @@ class DeceMSGApp {
 
             const roomState = await this.apiCall('/crypto/rooms/' + this.currentChat.id);
             const roomId = this.roomIdForChat(this.currentChat, roomState.epoch);
-            const recipient = await this.recipientMatrixUserId(this.currentChat);
+            const recipients = await this.recipientMatrixUserIds(this.currentChat);
             const encryptedEvent = await this.e2ee.encryptText(
                 this.currentChat.id,
                 roomId,
-                recipient,
+                recipients,
                 content || 'Sent a message',
                 payload => this.sendCryptoRequest(payload)
             );
