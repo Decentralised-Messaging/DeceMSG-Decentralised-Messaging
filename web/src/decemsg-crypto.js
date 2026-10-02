@@ -32,7 +32,7 @@ function requestDescriptor(request) {
   if (request instanceof ToDeviceRequest) {
     return {
       requestType: "to_device",
-      eventType: request.eventType,
+      eventType: request.event_type,
     };
   }
   throw new Error("Unsupported crypto request type: " + request.type);
