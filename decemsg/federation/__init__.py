@@ -54,6 +54,13 @@ def _origin_actor(user_id: str, origin_domain: str) -> bool:
     return bool(username and domain == origin_domain)
 
 
+def _message_origin_actor(message: Message) -> str | None:
+    """Return the canonical actor address represented by a message."""
+    if message.sender_federated_identity is not None:
+        return message.sender_federated_identity.full_address
+    return message.sender_id
+
+
 def _assert_origin_domain(claimed_domain: str, auth: AuthResult) -> None:
     if claimed_domain != auth.server_domain:
         raise HTTPException(
@@ -990,13 +997,13 @@ async def receive_message_update(
     federation_auth: AuthResult = Depends(require_federation_auth),
 ):
     """Receive an edit only from the server that owns the message actor."""
-    result = await db.execute(select(Message).where(Message.id == update.message_id))
+    result = await db.execute(select(Message).options(selectinload(Message.sender_federated_identity)).where(Message.id == update.message_id))
     message = result.scalar_one_or_none()
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
     if (
         message.chat_id != update.chat_id
-        or not _origin_actor(message.sender_id or "", federation_auth.server_domain)
+        or not _origin_actor(_message_origin_actor(message) or "", federation_auth.server_domain)
     ):
         raise HTTPException(status_code=403, detail="Federation server is not message origin")
 
@@ -1033,13 +1040,13 @@ async def receive_message_delete(
     federation_auth: AuthResult = Depends(require_federation_auth),
 ):
     """Receive a delete only from the server that owns the message actor."""
-    result = await db.execute(select(Message).where(Message.id == delete.message_id))
+    result = await db.execute(select(Message).options(selectinload(Message.sender_federated_identity)).where(Message.id == delete.message_id))
     message = result.scalar_one_or_none()
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
     if (
         message.chat_id != delete.chat_id
-        or not _origin_actor(message.sender_id or "", federation_auth.server_domain)
+        or not _origin_actor(_message_origin_actor(message) or "", federation_auth.server_domain)
     ):
         raise HTTPException(status_code=403, detail="Federation server is not message origin")
 
