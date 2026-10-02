@@ -11,6 +11,8 @@ import hmac
 import time
 import json
 import base64
+import secrets
+import threading
 from typing import Optional, Dict
 from datetime import datetime, timedelta
 from dataclasses import dataclass
@@ -313,17 +315,23 @@ def create_authenticated_request(
     if timestamp is None:
         timestamp = int(time.time())
     
-    # Create signature payload
-    payload = f"{method}:{path}:{timestamp}:{hashlib.sha256(body.encode()).hexdigest()}"
+    request_id = secrets.token_urlsafe(24)
+    key_id = key_manager.get_key_id()
+    domain = get_config().server.domain
+    payload = (
+        f"{method}:{path}:{timestamp}:{request_id}:{domain}:{key_id}:"
+        f"{hashlib.sha256(body.encode()).hexdigest()}"
+    )
     
     signature = key_manager.sign_data(payload)
     
     return {
         "X-Server-Signature": signature,
-        "X-Server-Key-ID": key_manager.get_key_id(),
+        "X-Server-Key-ID": key_id,
         "X-Server-Timestamp": str(timestamp),
+        "X-Server-Request-ID": request_id,
         "X-Server-Public-Key": key_manager.get_public_key_pem(),
-        "X-Server-Domain": get_config().server.domain
+        "X-Server-Domain": domain,
     }
 
 
@@ -349,18 +357,20 @@ def verify_authenticated_request(
     # Extract headers
     signature = headers.get("X-Server-Signature")
     timestamp_str = headers.get("X-Server-Timestamp")
+    request_id = headers.get("X-Server-Request-ID")
     public_key = headers.get("X-Server-Public-Key")
     key_id = headers.get("X-Server-Key-ID")
     domain = headers.get("X-Server-Domain")
     
-    if not all([signature, timestamp_str, public_key, key_id, domain]):
+    if not all([signature, timestamp_str, request_id, public_key, key_id, domain]):
+        return False
         return False
     
     # Verify timestamp is recent (within 5 minutes)
     try:
         timestamp = int(timestamp_str)
         current_time = int(time.time())
-        if abs(current_time - timestamp) > 300:  # 5 minute window
+        if abs(current_time - timestamp) > REQUEST_FRESHNESS_SECONDS:
             return False
     except ValueError:
         return False
@@ -373,16 +383,53 @@ def verify_authenticated_request(
     if not get_trust_store().is_trusted(domain, key_id, public_key):
         return False
     
-    key_manager = get_key_manager()
-    payload = f"{method}:{path}:{timestamp}:{hashlib.sha256(body.encode()).hexdigest()}"
+    payload = (
+        f"{method}:{path}:{timestamp}:{request_id}:{domain}:{key_id}:"
+        f"{hashlib.sha256(body.encode()).hexdigest()}"
+    )
     
-    return key_manager.verify_signature(payload, signature, public_key)
+    try:
+        public_key_obj = serialization.load_pem_public_key(
+            public_key.encode(),
+            backend=default_backend(),
+        )
+        sig_bytes = base64.b64decode(signature, validate=True)
+        if len(sig_bytes) != 64:
+            return False
+        r = int.from_bytes(sig_bytes[:32], "big")
+        s = int.from_bytes(sig_bytes[32:], "big")
+        signature_der = encode_dss_signature(r, s)
+        public_key_obj.verify(
+            signature_der,
+            payload.encode("utf-8"),
+            ec.ECDSA(hashes.SHA256()),
+        )
+    except Exception:
+        return False
+
+    now = int(time.time())
+    cache_key = (domain, key_id, request_id)
+    with _seen_requests_lock:
+        expired = [
+            key for key, seen_at in _seen_requests.items()
+            if now - seen_at > REQUEST_FRESHNESS_SECONDS
+        ]
+        for key in expired:
+            _seen_requests.pop(key, None)
+        if cache_key in _seen_requests:
+            return False
+        _seen_requests[cache_key] = now
+
+    return True
 
 
 # Global instances
 _key_manager: Optional[ServerKeyManager] = None
 _server_registry: Optional[ServerRegistry] = None
 _trust_store: Optional[ServerTrustStore] = None
+_seen_requests: Dict[tuple[str, str, str], int] = {}
+_seen_requests_lock = threading.Lock()
+REQUEST_FRESHNESS_SECONDS = 300
 
 
 def get_key_manager() -> ServerKeyManager:
