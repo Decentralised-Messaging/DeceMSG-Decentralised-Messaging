@@ -27,6 +27,7 @@ class UserSession(Base):
     )
     device_id: Mapped[str | None] = mapped_column(
         String(36),
+        ForeignKey("devices.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
