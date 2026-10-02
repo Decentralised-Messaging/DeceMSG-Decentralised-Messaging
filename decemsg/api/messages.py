@@ -244,23 +244,15 @@ async def send_message(
     )
     message = result.scalar_one()
     
-    # Prepare response after the outbox entries are added.
+    # Prepare the response payload; the transaction remains open until the
+    # federated outbox entries have been added.
     message_dict = message.to_dict()
 
-    await db.commit()
-
-    # Broadcast to chat members via WebSocket
     broadcast_message = {
         "type": "new_message",
         "chat_id": chat_id,
         "message": message_dict
     }
-    
-    member_ids = [m.user_id for m in chat.members]
-    await manager.broadcast_to_chat(broadcast_message, chat_id, exclude_user=current_user.id)
-    
-    # Also send to sender for confirmation
-    await manager.send_personal_message(broadcast_message, current_user.id)
     
     # Route to federated members by adding durable outbox jobs before commit.
     for member in chat.members:
