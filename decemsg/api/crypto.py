@@ -103,6 +103,32 @@ async def _keys_query(body: dict[str, Any], db: AsyncSession) -> dict[str, Any]:
             json.loads(state.device_keys).get("device_id", ""): json.loads(state.device_keys)
             for state in states
         }
+
+@router.post("/to-device/ack")
+async def acknowledge_to_device_events(
+    event_ids: list[str],
+    current_user: User = Depends(get_current_user),
+    current_session: UserSession = Depends(get_current_session),
+    db: AsyncSession = Depends(get_db),
+):
+    device = await _require_current_device(current_user, current_session, db)
+    if not event_ids:
+        return {"acknowledged": 0}
+
+    result = await db.execute(
+        select(CryptoToDeviceMessage).where(
+            CryptoToDeviceMessage.id.in_(event_ids),
+            CryptoToDeviceMessage.recipient_user_id == current_user.id,
+            CryptoToDeviceMessage.recipient_device_id == device.id,
+            CryptoToDeviceMessage.delivered_at.is_(None),
+        )
+    )
+    events = result.scalars().all()
+    now = datetime.utcnow()
+    for event in events:
+        event.delivered_at = now
+    await db.commit()
+    return {"acknowledged": len(events)}
     return response
 
 
@@ -309,14 +335,16 @@ async def get_to_device_events(
         .limit(100)
     )
     events = result.scalars().all()
-    for event in events:
-        event.delivered_at = datetime.utcnow()
-    await db.commit()
+
+    sender_ids = {event.sender_user_id for event in events}
+    sender_result = await db.execute(select(User).where(User.id.in_(sender_ids))) if sender_ids else None
+    sender_map = {user.id: _matrix_user_id(user) for user in (sender_result.scalars().all() if sender_result else [])}
 
     return {
         "events": [
             {
-                "sender_user_id": event.sender_user_id,
+                "id": event.id,
+                "sender": sender_map.get(event.sender_user_id),
                 "event_type": event.event_type,
                 "content": event.content,
                 "transaction_id": event.transaction_id,
