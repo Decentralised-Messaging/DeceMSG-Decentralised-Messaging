@@ -139,6 +139,8 @@ async def route_message(
     
     except Exception as e:
         logger.error(f"Error routing federated message: {e}")
+        if db is not None:
+            raise
         return False
 
 
