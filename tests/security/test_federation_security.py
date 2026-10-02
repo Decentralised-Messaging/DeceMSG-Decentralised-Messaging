@@ -503,6 +503,20 @@ def test_unauthorized_message_injection_is_rejected() -> None:
         from_domain="attacker.example",
         to_user="bob",
         content="injected",
+        event={
+            "event_type": "message",
+            "protocol_version": "1",
+            "origin_server": "attacker.example",
+            "origin_key_id": "attacker-key",
+            "actor_identity": "alice#attacker.example",
+            "target_identity": "bob#local.example",
+            "conversation_id": "chat-1",
+            "created_at": "2026-10-02T00:00:00",
+            "sequence": 0,
+            "message_type": "text",
+            "ciphertext": "injected",
+            "signature": "invalid",
+        },
     )
     with pytest.raises(Exception) as exc:
         asyncio.run(receive_message(payload, AsyncMock(), auth))
