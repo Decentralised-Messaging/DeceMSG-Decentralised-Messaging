@@ -22,7 +22,16 @@ def test_crypto_request_rejects_unknown_request_type() -> None:
 
 @pytest.mark.security
 def test_crypto_routes_are_registered() -> None:
-    paths = {route.path for route in app.routes if hasattr(route, "path")}
+    def collect_paths(routes):
+        paths = set()
+        for route in routes:
+            if hasattr(route, "path"):
+                paths.add(route.path)
+            if hasattr(route, "routes"):
+                paths.update(collect_paths(route.routes))
+        return paths
+
+    paths = collect_paths(app.routes)
     assert "/api/crypto/requests" in paths
     assert "/api/crypto/to-device" in paths
     assert "/api/crypto/to-device/ack" in paths
