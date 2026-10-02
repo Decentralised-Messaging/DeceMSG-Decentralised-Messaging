@@ -10,6 +10,7 @@ import {
   RoomId,
   RoomSettings,
   ProcessedToDeviceEventType,
+  RequestType,
   UserId,
   initAsync,
 } from "@matrix-org/matrix-sdk-crypto-wasm";
