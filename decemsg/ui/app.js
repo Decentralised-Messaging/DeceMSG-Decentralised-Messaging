@@ -677,7 +677,13 @@ class DeceMSGApp {
                 this.device = await this.cryptoStore.getDevice();
             }
             if (!this.e2eeReady && this.device) {
-                await this.initializeE2EE();
+                try {
+                    await this.initializeE2EE();
+                } catch (error) {
+                    this.e2ee = null;
+                    this.e2eeReady = false;
+                    console.error('E2EE initialization failed:', error);
+                }
             }
             const sidebarName = document.getElementById('sidebar-user-name');
             if (sidebarName) {
