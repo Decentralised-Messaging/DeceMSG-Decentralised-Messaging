@@ -77,3 +77,37 @@ jobs:
 
       - name: Run security-tagged tests
         run: python -m pytest -q -m security
+
+  web-crypto:
+    name: Browser crypto build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install browser dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Verify pinned crypto package
+        working-directory: web
+        run: npm run verify-crypto-package
+
+      - name: Build browser crypto staging tree
+        working-directory: web
+        run: npm run build
+
+      - name: Verify build manifest and WASM payload
+        working-directory: web
+        run: |
+          test -f dist/BUILD_MANIFEST.json
+          test -f dist/vendor/matrix-sdk-crypto-wasm/pkg/matrix_sdk_crypto_wasm_bg.wasm
