@@ -130,6 +130,7 @@ for (const request of keyShareRequests) {
     new Map(),
   );
   console.log("processed room-key events:", processed.map((item) => item.type));
+  console.log("processed room-key raw event:", processed.map((item) => item.rawEvent));
 }
 
 const encryptedContent = await alice.encryptRoomEvent(
