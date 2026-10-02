@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization, hashes
-from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature, encode_dss_signature
 from cryptography.hazmat.backends import default_backend
 
 
@@ -126,7 +126,7 @@ class ServerKeyManager:
             # Reconstruct signature in DER format
             r = int.from_bytes(sig_bytes[:32], 'big')
             s = int.from_bytes(sig_bytes[32:64], 'big')
-            signature_der = decode_dss_signature((r, s))
+            signature_der = encode_dss_signature(r, s)
             
             public_key.verify(signature_der, data.encode('utf-8'), ec.ECDSA(hashes.SHA256()))
             return True
