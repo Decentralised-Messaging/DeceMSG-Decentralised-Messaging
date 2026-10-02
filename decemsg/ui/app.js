@@ -510,23 +510,30 @@ class DeceMSGApp {
             this.ws.close();
         }
 
-        const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws?token=${this.token}`;
+        const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws`;
         
         this.ws = new WebSocket(wsUrl);
 
         this.ws.onopen = () => {
-            console.log('WebSocket connected');
-            // Join all chat rooms
-            this.chats.forEach(chat => {
-                this.ws.send(JSON.stringify({
-                    type: 'join_chat',
-                    chat_id: chat.id
-                }));
-            });
+            // Authenticate as the first WebSocket application frame.
+            this.ws.send(JSON.stringify({
+                type: 'authenticate',
+                token: this.token
+            }));
         };
 
         this.ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
+            if (data.type === 'authenticated') {
+                console.log('WebSocket authenticated');
+                this.chats.forEach(chat => {
+                    this.ws.send(JSON.stringify({
+                        type: 'join_chat',
+                        chat_id: chat.id
+                    }));
+                });
+                return;
+            }
             this.handleWebSocketMessage(data);
         };
 
