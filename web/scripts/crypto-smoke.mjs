@@ -82,7 +82,7 @@ for (const [deviceId, algorithms] of Object.entries(
   claimBody.one_time_keys["@bob:example.com"],
 )) {
   const source = deviceId === "BOB_DEVICE" ? bobUploadBody : bobSecondUploadBody;
-  const requestedAlgorithm = Object.keys(algorithms)[0];
+  const requestedAlgorithm = String(algorithms);
   const matching = Object.entries(source.one_time_keys).find(([name]) =>
     name.startsWith(requestedAlgorithm + ":"),
   );
