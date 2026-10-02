@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from decemsg.core.database import Base
@@ -50,3 +50,16 @@ class CryptoToDeviceMessage(Base):
     transaction_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class CryptoRoomState(Base):
+    """Application-level room epoch used to force key rotation after device revocation."""
+
+    __tablename__ = "crypto_room_states"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    chat_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("chats.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
+    )
+    epoch: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
