@@ -430,6 +430,14 @@ Select a mature, reviewed messaging cryptographic protocol rather than inventing
 
 The maintained browser-capable Signal implementation needs to be integrated through a reproducible frontend build/bundling pipeline and its AGPL licensing must be reviewed for compatibility with the project's distribution model. The repository currently has a static vanilla-JS client and no frontend package/build pipeline. Implementing a custom Web Crypto replacement would violate TASK-015's prohibition on custom messaging cryptography.
 
+#### Blocker verification — 2026-10-02
+
+- DeceMSG is currently distributed under **Apache-2.0** (repository `LICENSE`).
+- The current official Signal `libsignal` repository exposes a TypeScript API, but its repository is licensed **AGPL-3.0-only** and states that use outside Signal is unsupported. citeturn2search1turn2search0
+- An August 2026 upstream issue specifically asks Signal for guidance on using current libsignal in a new messenger, including licensing and distribution questions; no project-level licensing decision should be inferred from that issue. citeturn2search8
+- Therefore the implementation is intentionally **not** replacing the Apache-2.0 project license or embedding libsignal without an explicit licensing decision.
+- A technically viable Apache-2.0 alternative exists in the Matrix ecosystem: `@matrix-org/matrix-sdk-crypto-wasm` is a browser-oriented WebAssembly binding and is published under Apache-2.0. It implements the Olm/Megolm-based Matrix E2EE state machine, so adopting it would require revisiting TASK-015's Signal-family selection and the protocol mapping rather than silently substituting a different cryptographic protocol. citeturn3search0turn3search3
+
 ## TASK-017 — Implement Multi-Device Key Distribution and Revocation
 
 **Priority:** P1  
