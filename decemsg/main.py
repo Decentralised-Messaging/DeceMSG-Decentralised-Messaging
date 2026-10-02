@@ -60,6 +60,23 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     
+    @app.middleware("http")
+    async def security_headers(request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self'; style-src 'self'; "
+            "img-src 'self' data: blob:; connect-src 'self' ws: wss:; "
+            "font-src 'self'; object-src 'none'; base-uri 'self'; "
+            "frame-ancestors 'none'; form-action 'self';",
+        )
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault(
+            "Referrer-Policy",
+            "strict-origin-when-cross-origin",
+        )
+        return response
+
     # Add rate limiter
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
