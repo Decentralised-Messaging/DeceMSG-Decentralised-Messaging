@@ -1038,37 +1038,32 @@ async def receive_typing_indicator(
     db: AsyncSession = Depends(get_db),
     federation_auth: AuthResult = Depends(require_federation_auth),
 ):
-    """Receive a typing indicator from a federated user."""
-    try:
-        if not _origin_actor(typing.user_id, federation_auth.server_domain):
-            raise HTTPException(status_code=403, detail="Typing actor is not owned by authenticated server")
-        from decemsg.api.websocket import manager
-        import asyncio
-        
-        notification = {
-            "type": "typing_indicator",
-            "chat_id": typing.chat_id,
-            "user_id": typing.user_id,
-            "is_typing": typing.is_typing
-        }
-        
-        # Get local members of this chat
-        result = await db.execute(
-            select(ChatMember).where(ChatMember.chat_id == typing.chat_id)
-        )
-        members = result.scalars().all()
-        
-        for member in members:
-            if not is_federated_user(member.user_id):
-                await manager.send_personal_message(notification, member.user_id)
-        
-        return {"status": "received"}
-    except Exception as e:
-        print(f"Error processing typing indicator: {e}")
-        return {"status": "error"}
+    """Receive a typing indicator only from an authorized remote actor."""
+    if not _origin_actor(typing.user_id, federation_auth.server_domain):
+        raise HTTPException(status_code=403, detail="Typing actor is not owned by authenticated server")
 
+    result = await db.execute(
+        select(ChatMember).where(ChatMember.chat_id == typing.chat_id)
+    )
+    members = result.scalars().all()
+    if not any(member.user_id == typing.user_id for member in members):
+        raise HTTPException(status_code=403, detail="Typing actor is not a chat member")
 
-# ============= Block List Sync =============
+    from decemsg.api.websocket import manager
+    for member in members:
+        if not is_federated_user(member.user_id):
+            await manager.send_personal_message(
+                {
+                    "type": "typing_indicator",
+                    "chat_id": typing.chat_id,
+                    "user_id": typing.user_id,
+                    "is_typing": typing.is_typing,
+                },
+                member.user_id,
+            )
+
+    return {"status": "received"}
+
 
 @router.post("/blocks/sync")
 async def sync_block_list(
