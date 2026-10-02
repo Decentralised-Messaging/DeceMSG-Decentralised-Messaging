@@ -76,21 +76,21 @@ export class DeceMSGCrypto {
     return roomId;
   }
 
-  async ensureRecipientSession(chatId, roomIdText, recipientUserId, sendRequest) {
+  async ensureRecipientSessions(chatId, roomIdText, recipientUserIds, sendRequest) {
     const roomId = await this.initializeRoom(roomIdText);
-    const recipient = new UserId(recipientUserId);
+    const recipients = recipientUserIds.map((userId) => new UserId(userId));
 
-    await this.#machine.updateTrackedUsers([recipient]);
+    await this.#machine.updateTrackedUsers(recipients);
     await this.flushRequests(chatId, sendRequest);
 
-    const missing = await this.#machine.getMissingSessions([recipient]);
+    const missing = await this.#machine.getMissingSessions(recipients);
     if (missing) {
       await this.#sendRequest(chatId, missing, sendRequest);
     }
 
     const shareRequests = await this.#machine.shareRoomKey(
       roomId,
-      [recipient],
+      recipients,
       new EncryptionSettings(),
     );
     for (const request of shareRequests) {
@@ -100,11 +100,14 @@ export class DeceMSGCrypto {
     return roomId;
   }
 
-  async encryptText(chatId, roomIdText, recipientUserId, plaintext, sendRequest) {
-    const roomId = await this.ensureRecipientSession(
+  async encryptText(chatId, roomIdText, recipientUserIds, plaintext, sendRequest) {
+    const recipients = Array.isArray(recipientUserIds)
+      ? recipientUserIds
+      : [recipientUserIds];
+    const roomId = await this.ensureRecipientSessions(
       chatId,
       roomIdText,
-      recipientUserId,
+      recipients,
       sendRequest,
     );
     const event = await this.#machine.encryptRoomEvent(
