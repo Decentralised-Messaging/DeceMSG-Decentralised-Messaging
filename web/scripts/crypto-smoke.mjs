@@ -117,14 +117,14 @@ for (const request of keyShareRequests) {
   const content = body.messages["@bob:example.com"]["BOB_DEVICE"];
   if (!content) throw new Error("Room-key share did not target Bob");
 
+  const toDeviceEvent = {
+    sender: "@alice:example.com",
+    type: String(request.eventType),
+    content,
+  };
+  console.log("to-device event:", JSON.stringify(toDeviceEvent));
   const processed = await bob.receiveSyncChanges(
-    JSON.stringify([
-      {
-        sender: "@alice:example.com",
-        type: request.eventType,
-        content,
-      },
-    ]),
+    JSON.stringify([toDeviceEvent]),
     new DeviceLists(),
     new Map(),
   );
