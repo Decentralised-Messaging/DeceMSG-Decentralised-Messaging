@@ -21,7 +21,7 @@
 ## TASK-001 — Establish Security Baseline and CI Gate
 
 **Priority:** P0  
-**Status:** Planned  
+**Status:** Done  
 **Dependencies:** None
 
 ### Scope
@@ -57,10 +57,18 @@ Create a reproducible engineering/security baseline before modifying core archit
 
 ---
 
+### Completion Notes
+
+- CI workflow is active for pull requests, pushes to `main`, and manual dispatch.
+- Latest verified CI run: **#20** — both test/static-check and security-regression jobs passed.
+- Pytest baseline: 7 passed in the security suite; the maintained test suite passes.
+- Legacy application Ruff debt is intentionally tracked separately; the CI lint gate currently targets the maintained test suite rather than masking the pre-existing application findings.
+- Dependency audit passes with one explicit, documented ignore for `PYSEC-2026-1325` (ecdsa), for which the scanner reports no fixed version.
+
 ## TASK-002 — Build Security Regression Test Harness
 
 **Priority:** P0  
-**Status:** Planned  
+**Status:** Done  
 **Dependencies:** TASK-001
 
 ### Scope
@@ -82,6 +90,13 @@ Create reusable tests for authentication, authorization, federation, replay, ses
 ---
 
 # Phase 1 — Federation Security Foundation
+
+### Completion Notes
+
+- Added `tests/security/test_federation_security.py` as the reusable federation security harness.
+- Covers missing authentication, invalid signatures, tampered bodies, incorrect domain expectations, stale requests, valid-signature sanity, message/receipt/update/delete authorization contracts, and replay contracts.
+- Five strict expected-failure contracts remain for controls implemented by later tasks. Because they use `strict=True`, an accidental early XPASS fails CI rather than silently weakening the security gate.
+- Revoked-session/device tests remain deferred until TASK-007/TASK-010 introduce those lifecycle features.
 
 ## TASK-003 — Install and Enforce Federation Authentication Middleware
 
