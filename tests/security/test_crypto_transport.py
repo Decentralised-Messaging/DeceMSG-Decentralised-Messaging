@@ -3,7 +3,7 @@
 import pytest
 
 from decemsg.api.crypto import CryptoRequest, _matrix_user_id
-from decemsg.main import app
+from decemsg.api import crypto_router
 from decemsg.models.crypto import CryptoDeviceState, CryptoToDeviceMessage
 from decemsg.api.messages import MessageCreate
 
@@ -22,20 +22,10 @@ def test_crypto_request_rejects_unknown_request_type() -> None:
 
 @pytest.mark.security
 def test_crypto_routes_are_registered() -> None:
-    def collect_paths(routes):
-        paths = set()
-        for route in routes:
-            if hasattr(route, "path"):
-                paths.add(route.path)
-            if hasattr(route, "routes"):
-                paths.update(collect_paths(route.routes))
-        return paths
-
-    paths = collect_paths(app.routes)
+    paths = {route.path for route in crypto_router.routes}
     assert "/api/crypto/requests" in paths
     assert "/api/crypto/to-device" in paths
     assert "/api/crypto/to-device/ack" in paths
-
 
 @pytest.mark.security
 def test_crypto_state_models_contain_no_private_key_fields() -> None:
