@@ -651,46 +651,41 @@ async def sync_chat_from_federation(
     db: AsyncSession = Depends(get_db),
     federation_auth: AuthResult = Depends(require_federation_auth),
 ):
-    """Receive chat sync from a federated server (direct chat)."""
-    config = get_config()
-    
-    # A remote server may only sync an already-established chat and actors
-    # belonging to its own domain. It cannot add arbitrary local users.
-    if not any(_origin_actor(member, federation_auth.server_domain) for member in sync_data.members):
-        raise HTTPException(status_code=403, detail="No authorized remote chat member")
-    
-    # Find the chat
-    result = await db.execute(
-        select(Chat).where(Chat.id == sync_data.chat_id)
-    )
-    chat = result.scalar_one_or_none()
-    
-    if not chat:
-        raise HTTPException(status_code=403, detail="Federation cannot create local chat state")
-    
-    if chat.type.value != "direct":
-        raise HTTPException(status_code=403, detail="Chat is not a direct federation chat")
+    """Synchronize an existing direct chat without granting local-user authority."""
+    remote_members = [
+        member for member in sync_data.members
+        if "#" in member
+    ]
+    if not remote_members or not all(
+        _origin_actor(member, federation_auth.server_domain)
+        for member in remote_members
+    ):
+        raise HTTPException(status_code=403, detail="Invalid federation member authority")
 
-            id=sync_data.chat_id,
-            type="direct",
-            name=None,
-            is_active=True,
-            keep_history=True
-        )
-        db.add(chat)
-        await db.flush()
-        
-        # Add all members
-        for member_id in sync_data.members:
-            member = ChatMember(
-                chat_id=sync_data.chat_id,
-                user_id=member_id,
-                role="member"
-            )
-            db.add(member)
-    
+    result = await db.execute(select(Chat).where(Chat.id == sync_data.chat_id))
+    chat = result.scalar_one_or_none()
+    if not chat or chat.type.value != "direct":
+        raise HTTPException(status_code=403, detail="Federation cannot create or replace local chat state")
+
+    existing_result = await db.execute(
+        select(ChatMember).where(ChatMember.chat_id == sync_data.chat_id)
+    )
+    existing_ids = {member.user_id for member in existing_result.scalars().all()}
+
+    for member_id in sync_data.members:
+        if "#" in member_id:
+            if not _origin_actor(member_id, federation_auth.server_domain):
+                raise HTTPException(status_code=403, detail="Remote member belongs to another domain")
+            if member_id not in existing_ids:
+                db.add(ChatMember(
+                    chat_id=sync_data.chat_id,
+                    user_id=member_id,
+                    role="member",
+                ))
+        elif member_id not in existing_ids:
+            raise HTTPException(status_code=403, detail="Remote server cannot add local users")
+
     await db.commit()
-    
     return {"status": "synced", "chat_id": sync_data.chat_id}
 
 
@@ -700,74 +695,35 @@ async def sync_group_chat(
     db: AsyncSession = Depends(get_db),
     federation_auth: AuthResult = Depends(require_federation_auth),
 ):
-    """Receive group chat sync from a federated server.
-    
-    This endpoint handles group chats that span multiple servers.
-    """
-    config = get_config()
-    
+    """Synchronize an existing group with server-owned remote members."""
     if not _origin_actor(group_data.created_by, federation_auth.server_domain):
         raise HTTPException(status_code=403, detail="Group creator is not owned by authenticated server")
-    if not all(
-        (not _origin_actor(member, federation_auth.server_domain) or _origin_actor(member, federation_auth.server_domain))
-        for member in group_data.members
-    ):
-        raise HTTPException(status_code=403, detail="Invalid group member authority")
-    
-    # Find the existing group chat
-    result = await db.execute(
-        select(Chat).where(Chat.id == group_data.chat_id)
-    )
-    chat = result.scalar_one_or_none()
-    
-    if not chat:
-        raise HTTPException(status_code=403, detail="Federation cannot create local group state")
-        chat = Chat(
-            id=group_data.chat_id,
-            type="group",
-            name=group_data.name,
-            is_active=True,
-            keep_history=True
-        )
-        db.add(chat)
-        await db.flush()
-    
-    # Only remote actors owned by the authenticated server may be added.
-    for member_id in group_data.members:
-        if _origin_actor(member_id, federation_auth.server_domain):
-            continue
-        existing = await db.execute(
-            select(ChatMember).where(
-                ChatMember.chat_id == group_data.chat_id,
-                ChatMember.user_id == member_id,
-            )
-        )
-        if existing.scalar_one_or_none() is None:
-            raise HTTPException(
-                status_code=403,
-                detail="Remote server cannot add or remove local members",
-            )
 
-    # Sync members - add any missing remote members
-    existing_members = await db.execute(
+    result = await db.execute(select(Chat).where(Chat.id == group_data.chat_id))
+    chat = result.scalar_one_or_none()
+    if not chat or chat.type.value != "group":
+        raise HTTPException(status_code=403, detail="Federation cannot create or replace local group state")
+
+    existing_result = await db.execute(
         select(ChatMember).where(ChatMember.chat_id == group_data.chat_id)
     )
-    existing_ids = {m.user_id for m in existing_members.scalars().all()}
-    
+    existing_ids = {member.user_id for member in existing_result.scalars().all()}
+
     for member_id in group_data.members:
-        if member_id not in existing_ids:
-            # Check if this is the creator
-            role = "admin" if member_id == group_data.created_by else "member"
-            member = ChatMember(
-                chat_id=group_data.chat_id,
-                user_id=member_id,
-                role=role
-            )
-            db.add(member)
-    
+        if "#" in member_id:
+            if not _origin_actor(member_id, federation_auth.server_domain):
+                raise HTTPException(status_code=403, detail="Remote member belongs to another domain")
+            if member_id not in existing_ids:
+                db.add(ChatMember(
+                    chat_id=group_data.chat_id,
+                    user_id=member_id,
+                    role="admin" if member_id == group_data.created_by else "member",
+                ))
+        elif member_id not in existing_ids:
+            raise HTTPException(status_code=403, detail="Remote server cannot add local members")
+
     await db.commit()
-    
-    # Notify local members about the group update
+
     try:
         from decemsg.api.websocket import manager
         import asyncio
@@ -776,7 +732,7 @@ async def sync_group_chat(
         )
     except Exception as e:
         print(f"Group update notification failed: {e}")
-    
+
     return {"status": "synced", "chat_id": group_data.chat_id}
 
 
@@ -1012,33 +968,30 @@ async def receive_message_update(
     db: AsyncSession = Depends(get_db),
     federation_auth: AuthResult = Depends(require_federation_auth),
 ):
-    """Receive a message edit from a federated server."""
+    """Receive an edit only from the server that owns the message actor."""
+    result = await db.execute(select(Message).where(Message.id == update.message_id))
+    message = result.scalar_one_or_none()
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if (
+        message.chat_id != update.chat_id
+        or not _origin_actor(message.sender_id or "", federation_auth.server_domain)
+    ):
+        raise HTTPException(status_code=403, detail="Federation server is not message origin")
+
+    message.content = update.content
+    await db.commit()
+
     try:
-        result = await db.execute(
-            select(Message).where(Message.id == update.message_id)
+        from decemsg.api.websocket import manager
+        import asyncio
+        asyncio.create_task(
+            _notify_message_update(manager, update.chat_id, update.message_id, update.content)
         )
-        message = result.scalar_one_or_none()
-        
-        if message:
-            if message.chat_id != update.chat_id or not _origin_actor(message.sender_id or "", federation_auth.server_domain):
-                raise HTTPException(status_code=403, detail="Federation server is not message origin")
-            message.content = update.content
-            await db.commit()
-            
-            # Notify all members
-            try:
-                from decemsg.api.websocket import manager
-                import asyncio
-                asyncio.create_task(
-                    _notify_message_update(manager, update.chat_id, update.message_id, update.content)
-                )
-            except Exception as e:
-                print(f"Message update notification failed: {e}")
-        
-        return {"status": "updated"}
     except Exception as e:
-        print(f"Error processing message update: {e}")
-        return {"status": "error"}
+        print(f"Message update notification failed: {e}")
+
+    return {"status": "updated"}
 
 
 async def _notify_message_update(manager, chat_id: str, message_id: str, content: str):
@@ -1058,33 +1011,30 @@ async def receive_message_delete(
     db: AsyncSession = Depends(get_db),
     federation_auth: AuthResult = Depends(require_federation_auth),
 ):
-    """Receive a message delete from a federated server."""
+    """Receive a delete only from the server that owns the message actor."""
+    result = await db.execute(select(Message).where(Message.id == delete.message_id))
+    message = result.scalar_one_or_none()
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if (
+        message.chat_id != delete.chat_id
+        or not _origin_actor(message.sender_id or "", federation_auth.server_domain)
+    ):
+        raise HTTPException(status_code=403, detail="Federation server is not message origin")
+
+    message.is_deleted = True
+    await db.commit()
+
     try:
-        result = await db.execute(
-            select(Message).where(Message.id == delete.message_id)
+        from decemsg.api.websocket import manager
+        import asyncio
+        asyncio.create_task(
+            _notify_message_delete(manager, delete.chat_id, delete.message_id)
         )
-        message = result.scalar_one_or_none()
-        
-        if message:
-            if message.chat_id != delete.chat_id or not _origin_actor(message.sender_id or "", federation_auth.server_domain):
-                raise HTTPException(status_code=403, detail="Federation server is not message origin")
-            message.is_deleted = True
-            await db.commit()
-            
-            # Notify all members
-            try:
-                from decemsg.api.websocket import manager
-                import asyncio
-                asyncio.create_task(
-                    _notify_message_delete(manager, delete.chat_id, delete.message_id)
-                )
-            except Exception as e:
-                print(f"Message delete notification failed: {e}")
-        
-        return {"status": "deleted"}
     except Exception as e:
-        print(f"Error processing message delete: {e}")
-        return {"status": "error"}
+        print(f"Message delete notification failed: {e}")
+
+    return {"status": "deleted"}
 
 
 async def _notify_message_delete(manager, chat_id: str, message_id: str):
