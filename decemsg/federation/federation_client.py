@@ -6,6 +6,7 @@ from datetime import datetime
 from decemsg.core.config import get_config
 from decemsg.federation.discovery import get_federation_client, ServerInfo
 from decemsg.federation.events import build_message_event
+from decemsg.federation.delivery_queue import enqueue_federation_delivery
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,6 @@ async def route_message(
         to_domain = config.server.domain
     
     try:
-        client = get_federation_client()
         event = build_message_event(
             actor_identity=f"{from_username}#{from_domain}",
             target_identity=f"{to_username}#{to_domain}",
@@ -106,21 +106,22 @@ async def route_message(
             ciphertext=content,
             message_type=message_type,
         )
-        success = await client.send_message(
-            from_user=from_username,
-            from_domain=from_domain,
-            to_user=to_username,
-            to_domain=to_domain,
-            content=content,
-            message_type=message_type,
-            event=event,
+
+        success = await enqueue_federation_delivery(
+            idempotency_key=f"message:{event['event_id']}",
+            job_type="message",
+            destination_domain=to_domain,
+            payload={
+                "from_user": from_username,
+                "from_domain": from_domain,
+                "to_user": to_username,
+                "to_domain": to_domain,
+                "content": content,
+                "message_type": message_type,
+                "event": event,
+            },
         )
-        
-        if success:
-            logger.info(f"Federated message sent from {from_username}@{from_domain} to {to_username}@{to_domain}")
-        else:
-            logger.warning(f"Failed to send federated message from {from_username}@{from_domain} to {to_username}@{to_domain}")
-        
+
         return success
     
     except Exception as e:
