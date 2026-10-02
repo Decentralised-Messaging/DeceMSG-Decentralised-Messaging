@@ -45,3 +45,8 @@ include = ["decemsg*"]
 
 [tool.reflex]
 frontend_dir = "decemsg/ui"
+
+[tool.pytest.ini_options]
+markers = [
+    "security: security regression tests",
+]
