@@ -22,6 +22,7 @@ from decemsg.core.config import get_config
 from decemsg.core.rate_limiter import limiter, get_login_rate_limit
 from decemsg.models.user import User
 from decemsg.models.session import UserSession
+from decemsg.models.identity import UserIdentity
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
@@ -164,6 +165,12 @@ async def register(
     )
     
     db.add(user)
+    await db.flush()
+    db.add(UserIdentity(
+        user_id=user.id,
+        username=user.username,
+        domain=user.domain,
+    ))
     await db.commit()
     await db.refresh(user)
     
