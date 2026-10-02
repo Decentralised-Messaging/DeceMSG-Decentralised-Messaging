@@ -502,18 +502,18 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 ## TASK-019 — Define Signed Federation Event Envelope
 
 **Priority:** P2  
-**Status:** In Progress  
+**Status:** Done  
 **Dependencies:** TASK-005, TASK-011, TASK-016
 
 ### Acceptance Criteria
 
-- [ ] Event schema contains event ID, type, protocol version, origin, key ID, actor, target, conversation, timestamp, sequence, payload/ciphertext, and signature as appropriate.
-- [ ] Canonical serialization is defined.
-- [ ] Signature input is deterministic.
-- [ ] Event IDs are unique.
-- [ ] Protocol versioning is explicit.
-- [ ] Schema validation rejects malformed events.
-- [ ] Compatibility/versioning rules are documented.
+- [x] Event schema contains event ID, type, protocol version, origin, key ID, actor, target, conversation, timestamp, sequence, payload/ciphertext, and signature as appropriate.
+- [x] Canonical serialization is defined.
+- [x] Signature input is deterministic.
+- [x] Event IDs are unique.
+- [x] Protocol versioning is explicit.
+- [x] Schema validation rejects malformed events.
+- [x] Compatibility/versioning rules are documented.
 
 ---
 
@@ -523,27 +523,36 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 - Federation message ingress now requires an event envelope and verifies the event signature against the authenticated origin server key.
 - Federation message egress signs the ciphertext event and uses authenticated server transport.
 - Added tamper-rejection and canonicalization security regression tests.
-- Replay, duplicate, and durable idempotency behavior is intentionally deferred to TASK-020.
+- Replay, duplicate, and durable idempotency behavior is implemented by TASK-020.
 
 ---
 
 ## TASK-020 — Implement Replay Protection and Idempotency
 
 **Priority:** P2  
-**Status:** Planned  
+**Status:** In Progress  
 **Dependencies:** TASK-019
 
 ### Acceptance Criteria
 
-- [ ] Duplicate event IDs are detected.
-- [ ] Replaying an accepted event does not create duplicate effects.
-- [ ] Expired/stale events are rejected according to policy.
-- [ ] Sequence/order violations are detected where ordering is required.
-- [ ] Replay state survives process restart.
-- [ ] Concurrent duplicate delivery is safe.
-- [ ] Automated replay attack tests pass.
+- [x] Duplicate event IDs are detected.
+- [x] Replaying an accepted event does not create duplicate effects.
+- [x] Expired/stale events are rejected according to policy.
+- [x] Sequence/order violations are detected where ordering is required.
+- [x] Replay state survives process restart.
+- [x] Concurrent duplicate delivery is safe.
+- [x] Automated replay attack tests pass.
 
 ---
+
+### TASK-020 Verification Notes
+
+- Added a durable `FederatedEventState` table keyed by signed event ID.
+- Federation ingress records an event before applying message effects, so duplicate delivery is idempotent.
+- Event timestamps are bounded to five minutes, independent of HTTP transport freshness.
+- Positive sequence values cannot regress within an origin/actor/conversation stream; sequence 0 remains compatible with senders that do not yet allocate counters.
+- Added security regression tests for duplicate events, stale events, and sequence regression.
+- CI verification is pending on the dedicated task verification branch.
 
 ## TASK-021 — Replace File-Based Federation Queues with Durable Queues
 
