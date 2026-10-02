@@ -11,7 +11,7 @@ import pytest
 
 @pytest.mark.security
 def test_no_private_key_material_is_checked_in() -> None:
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[1]
     forbidden_suffixes = {
         ".pem",
         ".key",
