@@ -1,12 +1,13 @@
 """Federation router for cross-server message routing."""
 import logging
 from typing import Optional
+from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
 from decemsg.core.config import get_config
 from decemsg.federation.discovery import get_federation_client, ServerInfo
 from decemsg.federation.events import build_message_event
-from decemsg.federation.delivery_queue import enqueue_federation_delivery
+from decemsg.federation.delivery_queue import add_federation_delivery_job, enqueue_federation_delivery
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,7 @@ async def route_message(
     content: str,
     message_type: str = "text",
     conversation_id: str = "",
+    db: Optional[AsyncSession] = None,
 ) -> bool:
     """Route a message to a federated server if needed.
     
@@ -107,20 +109,31 @@ async def route_message(
             message_type=message_type,
         )
 
-        success = await enqueue_federation_delivery(
-            idempotency_key=f"message:{event['event_id']}",
-            job_type="message",
-            destination_domain=to_domain,
-            payload={
-                "from_user": from_username,
-                "from_domain": from_domain,
-                "to_user": to_username,
-                "to_domain": to_domain,
-                "content": content,
-                "message_type": message_type,
-                "event": event,
-            },
-        )
+        payload = {
+            "from_user": from_username,
+            "from_domain": from_domain,
+            "to_user": to_username,
+            "to_domain": to_domain,
+            "content": content,
+            "message_type": message_type,
+            "event": event,
+        }
+        if db is not None:
+            await add_federation_delivery_job(
+                db,
+                idempotency_key=f"message:{event['event_id']}",
+                job_type="message",
+                destination_domain=to_domain,
+                payload=payload,
+            )
+            success = True
+        else:
+            success = await enqueue_federation_delivery(
+                idempotency_key=f"message:{event['event_id']}",
+                job_type="message",
+                destination_domain=to_domain,
+                payload=payload,
+            )
 
         return success
     
