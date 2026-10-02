@@ -21,6 +21,9 @@ class _SessionDB:
     def __init__(self, sessions):
         self.sessions = sessions
 
+    async def commit(self):
+        return None
+
     async def execute(self, statement):
         # The production query carries the session ID and user ID as bound
         # parameters. For this unit harness, match the values from the token
