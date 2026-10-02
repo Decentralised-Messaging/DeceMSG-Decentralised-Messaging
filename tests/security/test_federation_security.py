@@ -10,13 +10,29 @@ fail CI, forcing the contract annotation to be removed deliberately.
 import asyncio
 import time
 from unittest.mock import AsyncMock
+from types import SimpleNamespace
 
 import pytest
 from fastapi import Request
 from starlette.responses import Response
 
-from decemsg.federation.auth_middleware import FederationAuthMiddleware
+from decemsg.federation.auth_middleware import AuthResult, FederationAuthMiddleware
 from decemsg.main import app
+from decemsg.federation import (
+    ChatSyncRequest,
+    DeliveryReceipt,
+    IncomingMessage,
+    MessageDeleteRequest,
+    MessageUpdateRequest,
+    TypingIndicatorRequest,
+    receive_delivery_receipt,
+    receive_message,
+    receive_message_delete,
+    receive_message_update,
+    receive_typing_indicator,
+    sync_chat_from_federation,
+    update_group_members,
+)
 from decemsg.federation.server_auth import (
     ServerKeyManager,
     ServerTrustStore,
@@ -428,40 +444,108 @@ def test_replayed_valid_federation_request_is_rejected(
 
 
 @pytest.mark.security
-@pytest.mark.xfail(
-    strict=True,
-    reason="TASK-006 must authorize federation message creation by actor/origin.",
-)
 def test_unauthorized_message_injection_is_rejected() -> None:
-    """A remote server must not inject a message for an unrelated actor."""
-    pytest.fail("Authorization contract is implemented by TASK-006.")
+    """A server cannot submit a message claiming another server's domain."""
+    auth = AuthResult(is_authenticated=True, server_domain="trusted.example")
+    payload = IncomingMessage(
+        from_user="alice",
+        from_domain="attacker.example",
+        to_user="bob",
+        content="injected",
+    )
+    with pytest.raises(Exception) as exc:
+        asyncio.run(receive_message(payload, AsyncMock(), auth))
+    assert getattr(exc.value, "status_code", None) == 403
 
 
 @pytest.mark.security
-@pytest.mark.xfail(
-    strict=True,
-    reason="TASK-006 must verify receipt ownership and conversation authority.",
-)
 def test_forged_delivery_receipt_is_rejected() -> None:
-    """A server must not forge a receipt for a conversation it does not own."""
-    pytest.fail("Receipt authorization contract is implemented by TASK-006.")
+    """A server cannot forge a receipt for an actor outside its domain."""
+    auth = AuthResult(is_authenticated=True, server_domain="trusted.example")
+    receipt = DeliveryReceipt(
+        message_id="message-1",
+        chat_id="chat-1",
+        status="read",
+        user_id="victim#attacker.example",
+        timestamp="2026-01-01T00:00:00Z",
+    )
+    with pytest.raises(Exception) as exc:
+        asyncio.run(receive_delivery_receipt(receipt, AsyncMock(), auth))
+    assert getattr(exc.value, "status_code", None) == 403
 
 
 @pytest.mark.security
-@pytest.mark.xfail(
-    strict=True,
-    reason="TASK-006 must authorize message edits by the original sender/origin.",
-)
 def test_unauthorized_message_update_is_rejected() -> None:
-    """A remote actor must not edit another actor's message."""
-    pytest.fail("Message update authorization contract is implemented by TASK-006.")
+    """A remote server cannot edit a message owned by another server."""
+    auth = AuthResult(is_authenticated=True, server_domain="attacker.example")
+    message = SimpleNamespace(chat_id="chat-1", sender_id="alice#trusted.example")
+    db = AsyncMock()
+    db.execute.return_value = SimpleNamespace(scalar_one_or_none=lambda: message)
+    update = MessageUpdateRequest(
+        message_id="message-1",
+        chat_id="chat-1",
+        content="tampered",
+    )
+
+    with pytest.raises(Exception) as exc:
+        asyncio.run(receive_message_update(update, db, auth))
+    assert getattr(exc.value, "status_code", None) == 403
 
 
 @pytest.mark.security
-@pytest.mark.xfail(
-    strict=True,
-    reason="TASK-006 must authorize message deletion by the original sender/origin.",
-)
 def test_unauthorized_message_delete_is_rejected() -> None:
-    """A remote actor must not delete another actor's message."""
-    pytest.fail("Message deletion authorization contract is implemented by TASK-006.")
+    """A remote server cannot delete a message owned by another server."""
+    auth = AuthResult(is_authenticated=True, server_domain="attacker.example")
+    message = SimpleNamespace(chat_id="chat-1", sender_id="alice#trusted.example")
+    db = AsyncMock()
+    db.execute.return_value = SimpleNamespace(scalar_one_or_none=lambda: message)
+    delete = MessageDeleteRequest(message_id="message-1", chat_id="chat-1")
+
+    with pytest.raises(Exception) as exc:
+        asyncio.run(receive_message_delete(delete, db, auth))
+    assert getattr(exc.value, "status_code", None) == 403
+
+
+@pytest.mark.security
+def test_federated_chat_sync_cannot_add_remote_actor_from_another_domain() -> None:
+    """Chat sync is scoped to the authenticated origin domain."""
+    auth = AuthResult(is_authenticated=True, server_domain="trusted.example")
+    sync = ChatSyncRequest(chat_id="chat-1", members=["alice#attacker.example"])
+
+    with pytest.raises(Exception) as exc:
+        asyncio.run(sync_chat_from_federation(sync, AsyncMock(), auth))
+    assert getattr(exc.value, "status_code", None) == 403
+
+
+@pytest.mark.security
+def test_group_member_update_cannot_manage_another_domain() -> None:
+    """Group membership operations cannot target actors owned by another server."""
+    auth = AuthResult(is_authenticated=True, server_domain="trusted.example")
+    db = AsyncMock()
+
+    with pytest.raises(Exception) as exc:
+        asyncio.run(
+            update_group_members(
+                "chat-1",
+                "add",
+                ["alice#attacker.example"],
+                db,
+                auth,
+            )
+        )
+    assert getattr(exc.value, "status_code", None) == 403
+
+
+@pytest.mark.security
+def test_typing_indicator_cannot_claim_another_domain() -> None:
+    """Typing events must be attributed to the authenticated origin."""
+    auth = AuthResult(is_authenticated=True, server_domain="trusted.example")
+    typing = TypingIndicatorRequest(
+        chat_id="chat-1",
+        user_id="alice#attacker.example",
+        is_typing=True,
+    )
+
+    with pytest.raises(Exception) as exc:
+        asyncio.run(receive_typing_indicator(typing, AsyncMock(), auth))
+    assert getattr(exc.value, "status_code", None) == 403
