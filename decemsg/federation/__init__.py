@@ -820,32 +820,24 @@ async def update_group_members(
         raise HTTPException(status_code=404, detail="Group chat not found")
     
     for member_id in members:
-        if action == "add":
-            # Check if member exists
-            existing = await db.execute(
-                select(ChatMember).where(
-                    ChatMember.chat_id == chat_id,
-                    ChatMember.user_id == member_id
-                )
+        identity = await _get_or_create_federated_identity(db, member_id)
+        existing = await db.execute(
+            select(ChatMember).where(
+                ChatMember.chat_id == chat_id,
+                ChatMember.federated_identity_id == identity.id,
             )
-            if not existing.scalar_one_or_none():
-                member = ChatMember(
-                    chat_id=chat_id,
-                    user_id=member_id,
-                    role="member"
-                )
-                db.add(member)
-        elif action == "remove":
-            existing = await db.execute(
-                select(ChatMember).where(
-                    ChatMember.chat_id == chat_id,
-                    ChatMember.user_id == member_id
-                )
-            )
-            member = existing.scalar_one_or_none()
-            if member:
-                await db.delete(member)
-    
+        )
+        member = existing.scalar_one_or_none()
+
+        if action == "add" and member is None:
+            db.add(ChatMember(
+                chat_id=chat_id,
+                federated_identity_id=identity.id,
+                role="member",
+            ))
+        elif action == "remove" and member is not None:
+            await db.delete(member)
+
     await db.commit()
     
     # Notify remaining members
