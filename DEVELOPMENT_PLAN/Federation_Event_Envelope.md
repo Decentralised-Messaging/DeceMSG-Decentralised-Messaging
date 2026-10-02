@@ -39,7 +39,7 @@ Transport authentication and event authentication are separate:
 2. The event envelope proves the origin server signed the exact event payload.
 3. The receiver checks origin server, key ID, actor identity, target identity, protocol version, ciphertext presence, and signature before storing the event.
 
-Replay and durable idempotency are intentionally handled by TASK-020 rather than duplicated in this envelope task.
+Event IDs are the durable idempotency key. Sequence is an optional per-origin/actor/conversation ordering field: sequence 0 is accepted for legacy senders that do not yet allocate a counter; positive sequence values must not regress. Durable duplicate detection and stale-event policy are implemented by TASK-020.
 
 ## Message handling rule
 
@@ -47,4 +47,4 @@ Federated message ingress requires the signed event envelope. The server stores 
 
 ## Compatibility
 
-Future protocol versions must preserve the canonical-signature rule or negotiate an explicit versioned serialization before accepting an event.
+Future protocol versions must preserve the canonical-signature rule or negotiate an explicit versioned serialization before accepting an event. Unknown fields are rejected for protocol v1 so signed payload interpretation cannot drift silently.
