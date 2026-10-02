@@ -2,6 +2,7 @@
 from decemsg.models.user import User
 from decemsg.models.chat import Chat, ChatMember, ChatType, MemberRole
 from decemsg.models.message import Message, MessageReaction, MessageType
+from decemsg.models.session import UserSession
 
 __all__ = [
     "User",
@@ -12,4 +13,5 @@ __all__ = [
     "Message",
     "MessageReaction",
     "MessageType",
+    "UserSession",
 ]
