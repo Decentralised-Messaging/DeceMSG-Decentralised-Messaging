@@ -5,6 +5,7 @@ from decemsg.models.message import Message, MessageReaction, MessageType
 from decemsg.models.session import UserSession
 from decemsg.models.identity import UserIdentity
 from decemsg.models.device import Device, DeviceStatus
+from decemsg.models.federated_identity import FederatedIdentity
 
 __all__ = [
     "User",
@@ -19,4 +20,5 @@ __all__ = [
     "UserIdentity",
     "Device",
     "DeviceStatus",
+    "FederatedIdentity",
 ]
