@@ -7,6 +7,7 @@ from decemsg.models.identity import UserIdentity
 from decemsg.models.device import Device, DeviceStatus
 from decemsg.models.federated_identity import FederatedIdentity
 from decemsg.models.recovery import IdentityRecoveryBackup
+from decemsg.models.federated_event import FederatedEventState
 
 __all__ = [
     "User",
@@ -23,4 +24,5 @@ __all__ = [
     "DeviceStatus",
     "FederatedIdentity",
     "IdentityRecoveryBackup",
+    "FederatedEventState",
 ]
