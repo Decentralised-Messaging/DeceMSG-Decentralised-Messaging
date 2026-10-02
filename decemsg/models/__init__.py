@@ -8,6 +8,7 @@ from decemsg.models.device import Device, DeviceStatus
 from decemsg.models.federated_identity import FederatedIdentity
 from decemsg.models.recovery import IdentityRecoveryBackup
 from decemsg.models.federated_event import FederatedEventState
+from decemsg.models.federation_delivery import FederationDeliveryJob
 
 __all__ = [
     "User",
@@ -25,4 +26,5 @@ __all__ = [
     "FederatedIdentity",
     "IdentityRecoveryBackup",
     "FederatedEventState",
+    "FederationDeliveryJob",
 ]
