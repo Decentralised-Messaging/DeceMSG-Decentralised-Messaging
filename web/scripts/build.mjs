@@ -9,6 +9,8 @@ const vendor = resolve(root, "node_modules/@matrix-org/matrix-sdk-crypto-wasm");
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 await cp(sourceUi, dist, { recursive: true });
+await mkdir(resolve(dist, "crypto"), { recursive: true });
+await cp(resolve(root, "src/decemsg-crypto.js"), resolve(dist, "crypto/decemsg-crypto.js"));
 await cp(vendor, resolve(dist, "vendor/matrix-sdk-crypto-wasm"), { recursive: true });
 
 await writeFile(
