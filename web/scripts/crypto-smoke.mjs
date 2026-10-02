@@ -175,4 +175,4 @@ try {
   if (error?.code === undefined) throw error;
 }
 
-console.log("DeceMSG E2EE smoke test passed: Alice encrypted, Bob decrypted, and no server-side plaintext step was used.");
+console.log("Alice encrypted, Bob decrypted, and an unauthorized Charlie device was rejected.");
