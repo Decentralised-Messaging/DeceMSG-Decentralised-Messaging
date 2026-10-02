@@ -443,7 +443,7 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 ## TASK-017 — Implement Multi-Device Key Distribution and Revocation
 
 **Priority:** P1  
-**Status:** Planned  
+**Status:** In Progress  
 **Dependencies:** TASK-016, TASK-012
 
 ### Acceptance Criteria
@@ -455,6 +455,16 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 - [ ] Key changes are authenticated.
 - [ ] Old/revoked device behavior is covered by tests.
 - [ ] Existing device functionality remains intact during enrollment.
+
+---
+
+### TASK-017 Current Work
+
+- Existing device enrollment/revocation remains the authoritative device lifecycle.
+- E2EE room state now has a server-managed epoch.
+- Revoking a device increments the epoch for every chat owned by that user, forcing future messages onto a new crypto room/session.
+- Browser encryption now embeds the crypto room ID in the opaque ciphertext envelope so recipients can decrypt historical epochs.
+- Remaining work: prove second-device enrollment, active-device fan-out, revocation negative tests, and key lifecycle synchronization.
 
 ---
 
