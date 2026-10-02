@@ -318,6 +318,8 @@ def test_trusted_key_rotation_accepts_new_key_and_rejects_revoked_old_key(
     store = ServerTrustStore()
     old_manager = ServerKeyManager()
     old_record = store.add_key("remote.example", old_manager.get_public_key_pem())
+    from pathlib import Path
+    Path("./data/server_identity_key.pem").unlink()
     new_manager = ServerKeyManager()
     new_record = store.add_key("remote.example", new_manager.get_public_key_pem())
 
