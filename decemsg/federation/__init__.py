@@ -13,12 +13,37 @@ from decemsg.federation.auth_middleware import AuthResult, require_federation_au
 from decemsg.models.user import User
 from decemsg.models.message import Message
 from decemsg.models.chat import Chat, ChatMember
+from decemsg.models.federated_identity import FederatedIdentity
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 router = APIRouter(prefix="/federation", tags=["Federation"])
 
 
 
+
+
+async def _get_or_create_federated_identity(
+    db: AsyncSession,
+    address: str,
+) -> FederatedIdentity:
+    """Resolve a canonical remote address to a dedicated remote identity."""
+    if "#" not in address:
+        raise HTTPException(status_code=400, detail="Invalid federated identity")
+    username, domain = address.split("#", 1)
+    result = await db.execute(
+        select(FederatedIdentity).where(
+            FederatedIdentity.username == username,
+            FederatedIdentity.domain == domain,
+        )
+    )
+    identity = result.scalar_one_or_none()
+    if identity is None:
+        identity = FederatedIdentity(username=username, domain=domain)
+        db.add(identity)
+        await db.flush()
+    identity.last_seen_at = datetime.utcnow()
+    return identity
 
 
 def _origin_actor(user_id: str, origin_domain: str) -> bool:
@@ -331,8 +356,9 @@ async def receive_message(
             detail="Recipient not found"
         )
     
-    # Create federated user ID for the sender
+    # Resolve the remote actor to an explicit FederatedIdentity.
     federated_sender_id = f"{message.from_user}#{message.from_domain}"
+    federated_identity = await _get_or_create_federated_identity(db, federated_sender_id)
     
     # Find or create direct chat with federated user
     # Chat ID is derived from sorted user IDs to ensure consistency
@@ -371,15 +397,15 @@ async def receive_message(
         # Add federated user as member
         fed_member = ChatMember(
             chat_id=chat_id,
-            user_id=federated_sender_id,
-            role="member"
+            federated_identity_id=federated_identity.id,
+            role="member",
         )
         db.add(fed_member)
     
     # Create the message in the proper chat
     new_message = Message(
         chat_id=chat_id,
-        sender_id=federated_sender_id,
+        sender_federated_identity_id=federated_identity.id,
         content=message.content,
         message_type=message.message_type,
         is_deleted=False
@@ -414,20 +440,22 @@ async def _notify_recipient(manager, user_id: str, chat_id: str, message):
     from decemsg.core.database import get_db
     async for db in get_db():
         from sqlalchemy import select
-        sender_id = message.sender_id
-        
-        # Get sender info from federation lookup if needed
-        if "#" in sender_id:
-            from decemsg.federation.federation_client import parse_user_id
-            username, domain = parse_user_id(sender_id)
+        if message.sender_federated_identity_id:
+            result = await db.execute(
+                select(FederatedIdentity).where(
+                    FederatedIdentity.id == message.sender_federated_identity_id
+                )
+            )
+            remote = result.scalar_one_or_none()
             sender_info = {
-                "id": sender_id,
-                "username": username,
-                "display_name": username,
-                "avatar_url": None,
-                "domain": domain
+                "id": remote.id if remote else message.sender_federated_identity_id,
+                "username": remote.username if remote else "unknown",
+                "display_name": remote.display_name if remote else "Unknown",
+                "avatar_url": remote.avatar_url if remote else None,
+                "domain": remote.domain if remote else None,
             }
         else:
+            sender_id = message.sender_id
             result = await db.execute(
                 select(User).where(User.id == sender_id)
             )
