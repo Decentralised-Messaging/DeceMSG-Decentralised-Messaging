@@ -5,7 +5,7 @@ import pytest
 from decemsg.api.crypto import CryptoRequest, _matrix_user_id
 from decemsg.api import crypto_router
 from decemsg.main import create_app
-from decemsg.models.crypto import CryptoDeviceState, CryptoToDeviceMessage
+from decemsg.models.crypto import CryptoDeviceState, CryptoToDeviceMessage, CryptoRoomState
 from decemsg.api.messages import MessageCreate
 
 
@@ -61,3 +61,20 @@ def test_matrix_user_id_uses_canonical_server_identity() -> None:
 def test_message_creation_contract_requires_ciphertext() -> None:
     request = MessageCreate(content="plaintext")
     assert request.encrypted_content is None
+
+
+@pytest.mark.security
+def test_crypto_room_epoch_is_persistent_server_state() -> None:
+    columns = set(CryptoRoomState.__table__.columns.keys())
+    assert "chat_id" in columns
+    assert "epoch" in columns
+    assert "updated_at" in columns
+
+
+@pytest.mark.security
+def test_group_membership_changes_rotate_crypto_epochs() -> None:
+    import inspect
+    from decemsg.api import chats
+
+    source = inspect.getsource(chats.add_member) + inspect.getsource(chats.remove_member)
+    assert "crypto_room.epoch += 1" in source
