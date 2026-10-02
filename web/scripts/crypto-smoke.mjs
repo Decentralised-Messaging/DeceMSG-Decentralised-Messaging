@@ -59,6 +59,20 @@ await bobSecond.markRequestAsSent(
   }),
 );
 
+const charlieRequests = await charlie.outgoingRequests();
+const charlieUpload = charlieRequests.find((request) => request instanceof KeysUploadRequest);
+if (!charlieUpload) throw new Error("Charlie's device did not produce a keys upload request");
+const charlieUploadBody = JSON.parse(charlieUpload.body);
+await charlie.markRequestAsSent(
+  charlieUpload.id,
+  charlieUpload.type,
+  JSON.stringify({
+    one_time_key_counts: {
+      signed_curve25519: Object.keys(charlieUploadBody.one_time_keys).length,
+    },
+  }),
+);
+
 await alice.markRequestAsSent(
   "alice-key-query",
   RequestType.KeysQuery,
@@ -82,7 +96,12 @@ const oneTimeKeys = {};
 for (const [deviceId, algorithms] of Object.entries(
   claimBody.one_time_keys["@bob:example.com"],
 )) {
-  const source = deviceId === "BOB_DEVICE" ? bobUploadBody : bobSecondUploadBody;
+  const source =
+    deviceId === "BOB_DEVICE"
+      ? bobUploadBody
+      : deviceId === "BOB_DEVICE_2"
+        ? bobSecondUploadBody
+        : charlieUploadBody;
   const requestedAlgorithm = String(algorithms);
   const matching = Object.entries(source.one_time_keys).find(([name]) =>
     name.startsWith(requestedAlgorithm + ":"),
@@ -99,20 +118,6 @@ await alice.markRequestAsSent(
       "@bob:example.com": oneTimeKeys,
     },
     failures: {},
-  }),
-);
-
-const charlieRequests = await charlie.outgoingRequests();
-const charlieUpload = charlieRequests.find((request) => request instanceof KeysUploadRequest);
-if (!charlieUpload) throw new Error("Charlie's device did not produce a keys upload request");
-const charlieUploadBody = JSON.parse(charlieUpload.body);
-await charlie.markRequestAsSent(
-  charlieUpload.id,
-  charlieUpload.type,
-  JSON.stringify({
-    one_time_key_counts: {
-      signed_curve25519: Object.keys(charlieUploadBody.one_time_keys).length,
-    },
   }),
 );
 
