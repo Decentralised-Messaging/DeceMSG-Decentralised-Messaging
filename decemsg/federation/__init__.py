@@ -437,6 +437,7 @@ async def _notify_recipient(manager, user_id: str, chat_id: str, message):
     from decemsg.api.websocket import ConnectionManager
     
     # Get sender info
+    sender_reference = message.sender_id
     from decemsg.core.database import get_db
     async for db in get_db():
         from sqlalchemy import select
