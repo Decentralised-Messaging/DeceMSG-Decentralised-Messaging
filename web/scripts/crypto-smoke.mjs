@@ -4,14 +4,12 @@ import {
   DeviceLists,
   EncryptionAlgorithm,
   EncryptionSettings,
-  KeysClaimRequest,
-  KeysQueryRequest,
   KeysUploadRequest,
   OlmMachine,
-  RequestType,
   ToDeviceRequest,
   RoomId,
   RoomSettings,
+  ProcessedToDeviceEventType,
   UserId,
   initAsync,
 } from "@matrix-org/matrix-sdk-crypto-wasm";
@@ -123,14 +121,14 @@ for (const request of keyShareRequests) {
     type: String(request.event_type),
     content,
   };
-  console.log("to-device event:", JSON.stringify(toDeviceEvent));
   const processed = await bob.receiveSyncChanges(
     JSON.stringify([toDeviceEvent]),
     new DeviceLists(),
     new Map(),
   );
-  console.log("processed room-key events:", processed.map((item) => item.type));
-  console.log("processed room-key raw event:", processed.map((item) => item.rawEvent));
+  if (processed.length !== 1 || processed[0].type !== ProcessedToDeviceEventType.Decrypted) {
+    throw new Error("Bob did not decrypt the room-key to-device event");
+  }
 }
 
 const encryptedContent = await alice.encryptRoomEvent(
@@ -148,17 +146,11 @@ const encryptedEvent = JSON.stringify({
   unsigned: { age: 0 },
 });
 
-let decrypted;
-try {
-  decrypted = await bob.decryptRoomEvent(
-    encryptedEvent,
-    room,
-    new DecryptionSettings(),
-  );
-} catch (error) {
-  console.error("room decrypt failed:", error?.name, error?.message, error?.code);
-  throw error;
-}
+const decrypted = await bob.decryptRoomEvent(
+  encryptedEvent,
+  room,
+  new DecryptionSettings(),
+);
 
 const clearEvent = JSON.parse(decrypted.event);
 if (clearEvent.content?.body !== "DeceMSG E2EE smoke test") {
