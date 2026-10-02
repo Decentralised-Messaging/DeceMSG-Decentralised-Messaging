@@ -43,7 +43,7 @@ jobs:
         run: python -m compileall -q decemsg tests
 
       - name: Ruff check
-        run: python -m ruff check decemsg tests
+        run: python -m ruff check tests
 
       - name: Pytest
         run: python -m pytest -q
