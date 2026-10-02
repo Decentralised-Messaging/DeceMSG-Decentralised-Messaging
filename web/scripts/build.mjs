@@ -13,6 +13,16 @@ await mkdir(resolve(dist, "crypto"), { recursive: true });
 await cp(resolve(root, "src/decemsg-crypto.js"), resolve(dist, "crypto/decemsg-crypto.js"));
 await cp(vendor, resolve(dist, "vendor/matrix-sdk-crypto-wasm"), { recursive: true });
 
+const indexPath = resolve(dist, "index.html");
+const indexHtml = await (await import("node:fs/promises")).readFile(indexPath, "utf8");
+const cryptoScript = '<script type="module" src="/ui/crypto/decemsg-crypto.js"></script>';
+await writeFile(
+  indexPath,
+  indexHtml.includes(cryptoScript)
+    ? indexHtml
+    : indexHtml.replace("</body>", cryptoScript + "</body>"),
+);
+
 await writeFile(
   resolve(dist, "BUILD_MANIFEST.json"),
   JSON.stringify({
