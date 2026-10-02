@@ -95,6 +95,7 @@ async def websocket_endpoint(websocket: WebSocket):
     )
 
     await manager.connect(websocket, user_id)
+    await websocket.send_json({"type": "authenticated"})
 
     # Load user's chats and subscribe to their chat rooms.
     async with session_factory() as db:
