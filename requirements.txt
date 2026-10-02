@@ -1,7 +1,7 @@
 # Core
-fastapi==0.115.6
+fastapi==0.142.2
 uvicorn[standard]==0.31.1
-python-multipart==0.0.20
+python-multipart==0.0.32
 websockets==12.0
 
 # Database
@@ -9,7 +9,7 @@ sqlalchemy==2.0.23
 aiosqlite==0.19.0
 
 # Auth
-python-jose[cryptography]==3.3.0
+python-jose[cryptography]==3.5.0
 bcrypt>=4.0.0
 
 # Config
@@ -19,11 +19,11 @@ pydantic-settings==2.1.0
 
 # Federation
 httpx==0.25.2
-dnspython==2.4.2
+dnspython==2.8.0
 
 # Utils
 aiofiles>=0.8.0
-python-dotenv==1.0.0
+python-dotenv==1.2.4
 
 # Rate Limiting
 slowapi==0.1.9
