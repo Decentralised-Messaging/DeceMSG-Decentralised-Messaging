@@ -2,8 +2,6 @@
 
 import asyncio
 from datetime import datetime, timedelta
-from types import SimpleNamespace
-
 import pytest
 
 from decemsg.core.auth import create_access_token, get_current_session
