@@ -14,6 +14,7 @@ from decemsg.core.database import get_db
 from decemsg.core.auth import get_current_user, get_current_admin_user
 from decemsg.core.config import get_config
 from decemsg.models.user import User
+from decemsg.models.identity import UserIdentity
 from decemsg.core.auth import get_password_hash
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
@@ -149,6 +150,12 @@ async def create_user(
     )
     
     db.add(user)
+    await db.flush()
+    db.add(UserIdentity(
+        user_id=user.id,
+        username=user.username,
+        domain=user.domain,
+    ))
     await db.commit()
     await db.refresh(user)
     
