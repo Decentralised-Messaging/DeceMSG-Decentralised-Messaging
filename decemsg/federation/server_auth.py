@@ -26,10 +26,111 @@ class ServerIdentity:
     """Identity information for a federated server."""
     domain: str
     public_key_pem: str
+    key_id: str = ""
     signature: Optional[str] = None
     issued_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
     is_verified: bool = False
+
+
+def public_key_id(public_key_pem: str) -> str:
+    """Return a stable SHA-256 identifier for a public key."""
+    public_key = serialization.load_pem_public_key(
+        public_key_pem.encode(),
+        backend=default_backend(),
+    )
+    der = public_key.public_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    return f"sha256:{hashlib.sha256(der).hexdigest()}"
+
+
+@dataclass
+class ServerTrustRecord:
+    """Policy binding a domain to one authorized federation signing key."""
+    domain: str
+    key_id: str
+    public_key_pem: str
+    not_before: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    revoked: bool = False
+
+
+class ServerTrustStore:
+    """Explicit trust store; discovery never creates trust."""
+
+    def __init__(self, records: Optional[list[ServerTrustRecord]] = None):
+        if records is None:
+            records = []
+            try:
+                configured = get_config().federation.trusted_keys
+                records = [
+                    ServerTrustRecord(
+                        domain=item.domain,
+                        key_id=item.key_id,
+                        public_key_pem=item.public_key_pem,
+                        not_before=item.not_before,
+                        expires_at=item.expires_at,
+                        revoked=item.revoked,
+                    )
+                    for item in configured
+                ]
+            except Exception:
+                records = []
+        self._records = {(r.domain, r.key_id): r for r in records}
+
+    def add_key(
+        self,
+        domain: str,
+        public_key_pem: str,
+        *,
+        not_before: Optional[datetime] = None,
+        expires_at: Optional[datetime] = None,
+        revoked: bool = False,
+    ) -> ServerTrustRecord:
+        key_id = public_key_id(public_key_pem)
+        record = ServerTrustRecord(
+            domain=domain,
+            key_id=key_id,
+            public_key_pem=public_key_pem,
+            not_before=not_before,
+            expires_at=expires_at,
+            revoked=revoked,
+        )
+        self._records[(domain, key_id)] = record
+        return record
+
+    def revoke_key(self, domain: str, key_id: str) -> bool:
+        record = self._records.get((domain, key_id))
+        if not record:
+            return False
+        record.revoked = True
+        return True
+
+    def is_trusted(
+        self,
+        domain: str,
+        key_id: str,
+        public_key_pem: str,
+        *,
+        now: Optional[datetime] = None,
+    ) -> bool:
+        now = now or datetime.utcnow()
+        record = self._records.get((domain, key_id))
+        if record is None or record.revoked:
+            return False
+        if record.not_before and now < record.not_before:
+            return False
+        if record.expires_at and now >= record.expires_at:
+            return False
+        try:
+            return (
+                public_key_id(public_key_pem) == key_id
+                and public_key_id(record.public_key_pem) == key_id
+            )
+        except Exception:
+            return False
 
 
 class ServerKeyManager:
@@ -83,6 +184,10 @@ class ServerKeyManager:
     def get_public_key_pem(self) -> str:
         """Get the server's public key in PEM format."""
         return self._public_key_pem
+
+    def get_key_id(self) -> str:
+        """Get the stable identifier for the server signing key."""
+        return public_key_id(self._public_key_pem)
     
     def sign_data(self, data: str) -> str:
         """Sign data with the server's private key.
@@ -215,6 +320,7 @@ def create_authenticated_request(
     
     return {
         "X-Server-Signature": signature,
+        "X-Server-Key-ID": key_manager.get_key_id(),
         "X-Server-Timestamp": str(timestamp),
         "X-Server-Public-Key": key_manager.get_public_key_pem(),
         "X-Server-Domain": get_config().server.domain
@@ -244,9 +350,10 @@ def verify_authenticated_request(
     signature = headers.get("X-Server-Signature")
     timestamp_str = headers.get("X-Server-Timestamp")
     public_key = headers.get("X-Server-Public-Key")
+    key_id = headers.get("X-Server-Key-ID")
     domain = headers.get("X-Server-Domain")
     
-    if not all([signature, timestamp_str, public_key]):
+    if not all([signature, timestamp_str, public_key, key_id, domain]):
         return False
     
     # Verify timestamp is recent (within 5 minutes)
@@ -258,11 +365,14 @@ def verify_authenticated_request(
     except ValueError:
         return False
     
-    # Verify domain if specified
+    # The claimed domain is an identity label; authorization comes from
+    # the explicit domain -> key trust binding.
     if server_domain and domain != server_domain:
         return False
+
+    if not get_trust_store().is_trusted(domain, key_id, public_key):
+        return False
     
-    # Verify signature
     key_manager = get_key_manager()
     payload = f"{method}:{path}:{timestamp}:{hashlib.sha256(body.encode()).hexdigest()}"
     
@@ -272,6 +382,7 @@ def verify_authenticated_request(
 # Global instances
 _key_manager: Optional[ServerKeyManager] = None
 _server_registry: Optional[ServerRegistry] = None
+_trust_store: Optional[ServerTrustStore] = None
 
 
 def get_key_manager() -> ServerKeyManager:
@@ -280,6 +391,20 @@ def get_key_manager() -> ServerKeyManager:
     if _key_manager is None:
         _key_manager = ServerKeyManager()
     return _key_manager
+
+
+def get_trust_store() -> ServerTrustStore:
+    """Return the configured federation trust store."""
+    global _trust_store
+    if _trust_store is None:
+        _trust_store = ServerTrustStore()
+    return _trust_store
+
+
+def reset_trust_store() -> None:
+    """Reset the trust store singleton."""
+    global _trust_store
+    _trust_store = None
 
 
 def get_server_registry() -> ServerRegistry:
