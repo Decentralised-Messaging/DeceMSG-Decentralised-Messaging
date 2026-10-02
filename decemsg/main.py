@@ -28,8 +28,10 @@ from decemsg.federation import router as federation_router
 from decemsg.federation.auth_middleware import FederationAuthMiddleware
 
 
-# Determine UI directory
-_ui_dir = Path(__file__).parent / "ui"
+# Prefer the reproducible browser build when present; source UI remains a dev fallback.
+_source_ui_dir = Path(__file__).parent / "ui"
+_built_ui_dir = Path(__file__).parent.parent / "web" / "dist"
+_ui_dir = _built_ui_dir if _built_ui_dir.exists() else _source_ui_dir
 
 
 @asynccontextmanager
@@ -117,18 +119,14 @@ def create_app() -> FastAPI:
         """Serve the main UI page."""
         return FileResponse(str(_ui_dir / "index.html"))
     
-    @app.get("/ui/{filename}")
+    @app.get("/ui/{filename:path}")
     async def ui_static(filename: str):
-        """Serve UI static files."""
-        file_path = _ui_dir / filename
-        if file_path.exists():
-            return FileResponse(str(file_path))
-        
-        # Try to serve from root
-        root_path = Path(filename)
-        if root_path.exists():
-            return FileResponse(str(root_path))
-        
+        """Serve built or source UI static files, including crypto vendor assets."""
+        requested = (_ui_dir / filename).resolve()
+        ui_root = _ui_dir.resolve()
+        if requested.is_file() and ui_root in requested.parents:
+            return FileResponse(str(requested))
+
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="File not found")
     
