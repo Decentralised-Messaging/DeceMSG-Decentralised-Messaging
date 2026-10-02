@@ -59,4 +59,4 @@ class Device(Base):
         nullable=True,
     )
 
-    user: Mapped["User"] = relationship("User", backref="devices")
+    user: Mapped["User"] = relationship("User", back_populates="devices")
