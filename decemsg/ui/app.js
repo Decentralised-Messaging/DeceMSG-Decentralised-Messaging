@@ -579,8 +579,8 @@ class DeceMSGApp {
         await this.apiCall('/crypto/to-device/ack', 'POST', result.events.map(event => event.id));
     }
 
-    roomIdForChat(chat) {
-        return '!' + chat.id + ':' + this.currentUser.domain;
+    roomIdForChat(chat, epoch = 0) {
+        return '!' + chat.id + '-' + epoch + ':' + this.currentUser.domain;
     }
 
     async recipientMatrixUserId(chat) {
@@ -1066,7 +1066,9 @@ class DeceMSGApp {
         } else {
             let displayContent = msg.content;
             try {
-                const encryptedContent = JSON.parse(msg.content);
+                const storedEnvelope = JSON.parse(msg.content);
+                const encryptedContent = storedEnvelope.event || storedEnvelope;
+                const roomId = storedEnvelope.room_id || this.roomIdForChat(this.currentChat, 0);
                 if (
                     this.e2eeReady &&
                     encryptedContent &&
@@ -1078,11 +1080,860 @@ class DeceMSGApp {
                         : '@' + msg.sender.username + ':' + msg.sender.domain;
                     const encryptedEvent = JSON.stringify({
                         type: 'm.room.encrypted',
+                        event_id: '                    displayContent = decrypted.body || decrypted.content?.body || '[Encrypted message]';
+                }
+            } catch (error) {
+                displayContent = '[Unable to decrypt message]';
+                console.error('E2EE message decryption failed:', error);
+            }
+            contentHtml = this.escapeHtml(displayContent);
+        }
+
+        // Build reactions
+        let reactionsHtml = '';
+        if (msg.reactions && Object.keys(msg.reactions).length > 0) {
+            const reactions = Object.entries(msg.reactions)
+                .map(([emoji, data]) => {
+                    const isMyReaction = data.user_ids?.includes(this.currentUser?.id);
+                    return `<span class="reaction-badge ${isMyReaction ? 'my-reaction' : ''}" data-emoji="${emoji}">${emoji} <span class="count">${data.count}</span></span>`;
+                })
+                .join('');
+            reactionsHtml = `<div class="message-reactions">${reactions}</div>`;
+        }
+
+        // Read receipt
+        let readReceipt = '';
+        if (msg.sender_id === this.currentUser?.id) {
+            readReceipt = '<span class="read-receipt">✓</span>';
+        }
+
+        div.innerHTML = `
+            ${!isCurrentUser ? `<div class="message-header"><span class="message-sender">${this.escapeHtml(senderName)}</span></div>` : ''}
+            <div class="message-content">${contentHtml}</div>
+            <div class="message-footer">
+                <span class="message-time">${this.formatTime(msg.created_at)}</span>
+                ${readReceipt}
+            </div>
+            ${reactionsHtml}
+        `;
+
+        // Add click handler for reactions
+        div.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            this.showReactionPicker(e, msg.id);
+        });
+
+        container.appendChild(div);
+    }
+
+    showReactionPicker(event, messageId) {
+        this.selectedMessage = messageId;
+        const picker = document.getElementById('reaction-picker');
+        const rect = event.target.getBoundingClientRect();
+        
+        picker.style.top = `${rect.bottom + 5}px`;
+        picker.style.left = `${rect.left}px`;
+        picker.classList.remove('hidden');
+    }
+
+    hideReactionPicker() {
+        document.getElementById('reaction-picker').classList.add('hidden');
+        this.selectedMessage = null;
+    }
+
+    async addReaction(emoji) {
+        if (!this.selectedMessage || !this.currentChat) return;
+        
+        try {
+            await this.apiCall(`/messages/${this.selectedMessage}/reactions`, 'POST', { emoji });
+            this.hideReactionPicker();
+            await this.loadMessages(this.currentChat.id);
+        } catch (error) {
+            console.error('Failed to add reaction:', error);
+        }
+    }
+
+    updateMessageReactions(data) {
+        if (this.currentChat && this.currentChat.id === data.chat_id) {
+            this.loadMessages(data.chat_id);
+        }
+    }
+
+    updateReadReceipt(data) {
+        const msgEl = document.querySelector(`[data-message-id="${data.message_id}"]`);
+        if (msgEl) {
+            const receipt = msgEl.querySelector('.read-receipt');
+            if (receipt) {
+                receipt.textContent = '✓✓';
+                receipt.classList.add('read');
+            }
+        }
+    }
+
+    sendReadReceipt(chatId, messageId) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({
+                type: 'read',
+                chat_id: chatId,
+                message_id: messageId
+            }));
+        }
+    }
+
+    async sendMessage() {
+        const input = document.getElementById('message-input');
+        const content = input.value.trim();
+
+        if (!this.currentChat) return;
+
+        try {
+            if (this.selectedFile) {
+                throw new Error('Encrypted file messages are not enabled yet');
+            }
+            if (!this.e2eeReady) {
+                throw new Error('E2EE is not ready');
+            }
+
+            const roomState = await this.apiCall('/crypto/rooms/' + this.currentChat.id);
+            const roomId = this.roomIdForChat(this.currentChat, roomState.epoch);
+            const recipient = await this.recipientMatrixUserId(this.currentChat);
+            const encryptedEvent = await this.e2ee.encryptText(
+                this.currentChat.id,
+                roomId,
+                recipient,
+                content || 'Sent a message',
+                payload => this.sendCryptoRequest(payload)
+            );
+
+            await this.apiCall(`/chats/${this.currentChat.id}/messages`, 'POST', {
+                encrypted_content: JSON.stringify({
+                    decemsg_crypto_v: 1,
+                    room_id: roomId,
+                    event: JSON.parse(encryptedEvent)
+                }),
+                message_type: 'text'
+            });
+
+            input.value = '';
+            this.removeSelectedFile();
+            await this.loadMessages(this.currentChat.id);
+            
+            this.sendTypingIndicator(false);
+
+        } catch (error) {
+            console.error('Failed to send message:', error);
+        }
+    }
+
+    async uploadFile(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch(`${this.apiBase}/upload`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${this.token}`
+            },
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error('File upload failed');
+        }
+
+        return response.json();
+    }
+
+    handleFileSelect(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        this.selectedFile = file;
+
+        const previewContainer = document.getElementById('file-preview-container');
+        const imagePreview = document.getElementById('file-preview-image');
+        const filePreview = document.getElementById('file-preview-info');
+        const fileName = document.getElementById('file-preview-name');
+
+        previewContainer.classList.remove('hidden');
+
+        if (file.type.startsWith('image/')) {
+            imagePreview.src = URL.createObjectURL(file);
+            imagePreview.classList.remove('hidden');
+            filePreview.classList.add('hidden');
+        } else {
+            imagePreview.classList.add('hidden');
+            filePreview.classList.remove('hidden');
+            fileName.textContent = file.name;
+        }
+    }
+
+    removeSelectedFile() {
+        this.selectedFile = null;
+        document.getElementById('file-preview-container').classList.add('hidden');
+        document.getElementById('file-input').value = '';
+    }
+
+    previewImage(url) {
+        window.open(url, '_blank');
+    }
+
+    getFileIcon(filename) {
+        const ext = filename?.split('.').pop()?.toLowerCase();
+        const icons = {
+            'pdf': '📄',
+            'doc': '📝', 'docx': '📝',
+            'txt': '📃',
+            'xls': '📊', 'xlsx': '📊',
+            'zip': '📦', 'rar': '📦',
+            'mp3': '🎵', 'wav': '🎵',
+            'mp4': '🎬', 'avi': '🎬'
+        };
+        return icons[ext] || '📎';
+    }
+
+    formatFileSize(bytes) {
+        if (!bytes) return '';
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+        return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`;
+    }
+
+    // New Chat Modal
+    showNewChatModal() {
+        document.getElementById('new-chat-modal').classList.remove('hidden');
+        this.pendingMembers = [];
+        this.renderSelectedMembers();
+    }
+
+    hideNewChatModal() {
+        document.getElementById('new-chat-modal').classList.add('hidden');
+        document.getElementById('new-chat-username').value = '';
+        document.getElementById('group-name').value = '';
+        document.getElementById('group-members').value = '';
+        this.pendingMembers = [];
+    }
+
+    setChatType(type) {
+        const directBtn = document.getElementById('btn-direct-chat');
+        const groupBtn = document.getElementById('btn-group-chat');
+        const directForm = document.getElementById('direct-chat-form');
+        const groupForm = document.getElementById('group-chat-form');
+
+        if (type === 'direct') {
+            directBtn.classList.add('active');
+            groupBtn.classList.remove('active');
+            directForm.classList.remove('hidden');
+            groupForm.classList.add('hidden');
+        } else {
+            directBtn.classList.remove('active');
+            groupBtn.classList.add('active');
+            directForm.classList.add('hidden');
+            groupForm.classList.remove('hidden');
+        }
+    }
+
+    renderSelectedMembers() {
+        const container = document.getElementById('selected-members');
+        container.innerHTML = '';
+        
+        this.pendingMembers.forEach(member => {
+            const div = document.createElement('div');
+            div.className = 'selected-member';
+            div.innerHTML = `
+                ${this.escapeHtml(member.display_name || member.username)}
+                <button data-user-id="${member.id}">×</button>
+            `;
+            div.querySelector('button').addEventListener('click', () => {
+                this.pendingMembers = this.pendingMembers.filter(m => m.id !== member.id);
+                this.renderSelectedMembers();
+            });
+            container.appendChild(div);
+        });
+    }
+
+    async startNewChat() {
+        const directBtn = document.getElementById('btn-direct-chat');
+        
+        try {
+            if (directBtn.classList.contains('active')) {
+                const username = document.getElementById('new-chat-username').value.trim();
+                if (!username) {
+                    alert('Please enter a username');
+                    return;
+                }
+
+                let targetUsername = username;
+                if (username.includes('#')) {
+                    const parts = username.split('#');
+                    targetUsername = parts[0];
+                }
+
+                const users = await this.apiCall(`/users/search?q=${targetUsername}`);
+                const targetUser = users.find(u => u.username === targetUsername);
+
+                if (!targetUser) {
+                    alert('User not found');
+                    return;
+                }
+
+                const chat = await this.apiCall('/chats', 'POST', {
+                    type: 'direct',
+                    member_ids: [targetUser.id]
+                });
+
+                this.hideNewChatModal();
+                this.loadChats();
+                this.openChat(chat);
+
+            } else {
+                const groupName = document.getElementById('group-name').value.trim();
+
+                if (!groupName) {
+                    alert('Please enter a group name');
+                    return;
+                }
+
+                const memberIds = this.pendingMembers.map(m => m.id);
+                
+                const chat = await this.apiCall('/chats', 'POST', {
+                    type: 'group',
+                    name: groupName,
+                    member_ids: memberIds
+                });
+
+                this.hideNewChatModal();
+                this.loadChats();
+                this.openChat(chat);
+            }
+        } catch (error) {
+            console.error('Failed to start chat:', error);
+            alert(error.message);
+        }
+    }
+
+    // Chat Info Panel
+    toggleChatInfoPanel() {
+        const panel = document.getElementById('chat-info-panel');
+        panel.classList.toggle('hidden');
+        
+        if (!panel.classList.contains('hidden') && this.currentChat) {
+            this.loadChatInfo();
+        }
+    }
+
+    async loadChatInfo() {
+        if (!this.currentChat) return;
+
+        const infoName = document.getElementById('info-name');
+        const infoType = document.getElementById('info-type');
+        const infoAvatar = document.getElementById('info-avatar');
+        
+        if (this.currentChat.type === 'direct') {
+            const otherMember = this.currentChat.members.find(m => m.user_id !== this.currentUser?.id);
+            if (otherMember?.user) {
+                infoName.textContent = otherMember.user.display_name || otherMember.user.username;
+                infoAvatar.textContent = this.getInitials(otherMember.user.display_name);
+            }
+            infoType.textContent = 'Direct Message';
+            document.querySelector('.group-only').classList.add('hidden');
+        } else {
+            infoName.textContent = this.currentChat.name || 'Group Chat';
+            infoAvatar.textContent = this.getInitials(this.currentChat.name);
+            infoType.textContent = `${this.currentChat.members.length} members`;
+            document.querySelector('.group-only').classList.remove('hidden');
+        }
+
+        const membersList = document.getElementById('members-list');
+        membersList.innerHTML = '';
+        
+        this.currentChat.members.forEach(member => {
+            const isAdmin = member.role === 'admin';
+            const div = document.createElement('div');
+            div.className = 'member-item';
+            div.innerHTML = `
+                <div class="avatar">${this.getInitials(member.user?.display_name || member.user?.username)}</div>
+                <div class="member-info">
+                    <div class="member-name">${this.escapeHtml(member.user?.display_name || member.user?.username)}</div>
+                    <div class="member-role">${isAdmin ? 'Admin' : 'Member'}</div>
+                </div>
+                ${this.currentChat.type === 'group' && (this.currentUser?.is_admin || isAdmin) && member.user_id !== this.currentUser?.id ? `
+                    <div class="member-actions">
+                        <button class="btn-secondary" onclick="app.removeMember('${member.user_id}')">Remove</button>
+                    </div>
+                ` : ''}
+            `;
+            membersList.appendChild(div);
+        });
+
+        document.getElementById('keep-history-toggle').checked = this.currentChat.keep_history;
+    }
+
+    async updateChatSetting(setting, value) {
+        if (!this.currentChat) return;
+
+        try {
+            await this.apiCall(`/chats/${this.currentChat.id}`, 'PUT', { [setting]: value });
+            this.currentChat[setting] = value;
+        } catch (error) {
+            console.error('Failed to update chat setting:', error);
+        }
+    }
+
+    async removeMember(userId) {
+        if (!this.currentChat) return;
+
+        try {
+            await this.apiCall(`/chats/${this.currentChat.id}/members/${userId}`, 'DELETE');
+            await this.loadChats();
+            this.currentChat = this.chats.find(c => c.id === this.currentChat.id);
+            this.loadChatInfo();
+        } catch (error) {
+            console.error('Failed to remove member:', error);
+        }
+    }
+
+    async leaveGroup() {
+        if (!this.currentChat || this.currentChat.type !== 'group') return;
+
+        try {
+            await this.apiCall(`/chats/${this.currentChat.id}/members/${this.currentUser?.id}`, 'DELETE');
+            this.toggleChatInfoPanel();
+            this.loadChats();
+        } catch (error) {
+            console.error('Failed to leave group:', error);
+        }
+    }
+
+    showAddMemberModal() {
+        document.getElementById('add-member-modal').classList.remove('hidden');
+        document.getElementById('add-member-username').value = '';
+        document.getElementById('search-member-result').innerHTML = '';
+    }
+
+    hideAddMemberModal() {
+        document.getElementById('add-member-modal').classList.add('hidden');
+    }
+
+    async searchMember() {
+        const username = document.getElementById('add-member-username').value.trim();
+        if (!username) return;
+
+        try {
+            const users = await this.apiCall(`/users/search?q=${username}`);
+            const resultDiv = document.getElementById('search-member-result');
+            
+            if (users.length === 0) {
+                resultDiv.innerHTML = '<p>No users found</p>';
+                return;
+            }
+
+            const user = users[0];
+            const isAlreadyMember = this.currentChat?.members.some(m => m.user_id === user.id);
+            const isPending = this.pendingMembers.some(m => m.id === user.id);
+
+            resultDiv.innerHTML = `
+                <div class="user-item">
+                    <div class="avatar">${this.getInitials(user.display_name)}</div>
+                    <div class="user-item-info">
+                        <div class="user-item-name">${this.escapeHtml(user.display_name)}</div>
+                        <div class="user-item-email">@${this.escapeHtml(user.username)}</div>
+                    </div>
+                    ${!isAlreadyMember && !isPending ? `
+                        <button class="btn-primary" onclick='app.addPendingMember(${JSON.stringify(user).replace(/"/g, '&quot;')})'>Add</button>
+                    ` : isPending ? '<span>Already added</span>' : '<span>Already in chat</span>'}
+                </div>
+            `;
+        } catch (error) {
+            console.error('Failed to search member:', error);
+        }
+    }
+
+    addPendingMember(user) {
+        if (!this.pendingMembers.find(m => m.id === user.id)) {
+            this.pendingMembers.push(user);
+            this.renderSelectedMembers();
+        }
+        this.hideAddMemberModal();
+    }
+
+    // Admin Panel
+    toggleAdminPanel() {
+        const panel = document.getElementById('admin-panel');
+        panel.classList.toggle('hidden');
+        
+        if (!panel.classList.contains('hidden')) {
+            this.loadUsers();
+            this.loadStats();
+        }
+    }
+
+    switchTab(tabName) {
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tabName);
+        });
+
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.toggle('active', content.id === `tab-${tabName}`);
+        });
+    }
+
+    async loadUsers(search = '') {
+        try {
+            const data = await this.apiCall(`/users?search=${search}`);
+            this.renderUserList(data.users);
+        } catch (error) {
+            console.error('Failed to load users:', error);
+        }
+    }
+
+    renderUserList(users) {
+        const container = document.getElementById('user-list');
+        container.innerHTML = '';
+
+        users.forEach(user => {
+            const div = document.createElement('div');
+            div.className = 'user-item';
+            div.innerHTML = `
+                <div class="avatar">${this.getInitials(user.display_name)}</div>
+                <div class="user-item-info">
+                    <div class="user-item-name">${this.escapeHtml(user.display_name)}</div>
+                    <div class="user-item-email">@${this.escapeHtml(user.username)}#${this.escapeHtml(user.domain)}</div>
+                </div>
+                <div class="user-item-actions">
+                    ${user.is_active ? 
+                        `<button class="btn-secondary" onclick="app.deactivateUser('${user.id}')">Deactivate</button>` :
+                        `<button class="btn-primary" onclick="app.activateUser('${user.id}')">Activate</button>`
+                    }
+                </div>
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    async createUser() {
+        const username = document.getElementById('new-user-username').value.trim();
+        const displayName = document.getElementById('new-user-display-name').value.trim();
+        const password = document.getElementById('new-user-password').value;
+        const confirmPassword = document.getElementById('new-user-password-confirm').value;
+        const isAdmin = document.getElementById('new-user-is-admin').checked;
+        const errorEl = document.getElementById('create-user-error');
+
+        errorEl.classList.add('hidden');
+
+        const usernamePattern = /^[a-zA-Z0-9_]+$/;
+        if (username.length < 3 || !usernamePattern.test(username)) {
+            errorEl.textContent = 'Username must be at least 3 characters and contain only letters, numbers, or underscores.';
+            errorEl.classList.remove('hidden');
+            return;
+        }
+        if (!displayName) {
+            errorEl.textContent = 'Display name is required.';
+            errorEl.classList.remove('hidden');
+            return;
+        }
+        if (password.length < 6) {
+            errorEl.textContent = 'Password must be at least 6 characters.';
+            errorEl.classList.remove('hidden');
+            return;
+        }
+        if (password !== confirmPassword) {
+            errorEl.textContent = 'Passwords do not match.';
+            errorEl.classList.remove('hidden');
+            return;
+        }
+
+        try {
+            await this.apiCall('/users', 'POST', {
+                username,
+                display_name: displayName,
+                password,
+                is_admin: isAdmin
+            });
+
+            this.hideCreateUserModal();
+            this.loadUsers();
+        } catch (error) {
+            errorEl.textContent = error.message;
+            errorEl.classList.remove('hidden');
+        }
+    }
+
+    async deactivateUser(userId) {
+        try {
+            await this.apiCall(`/users/${userId}`, 'PUT', { is_active: false });
+            this.loadUsers(document.getElementById('search-users').value);
+        } catch (error) {
+            alert(error.message);
+        }
+    }
+
+    async activateUser(userId) {
+        try {
+            await this.apiCall(`/users/${userId}`, 'PUT', { is_active: true });
+            this.loadUsers(document.getElementById('search-users').value);
+        } catch (error) {
+            alert(error.message);
+        }
+    }
+
+    showCreateUserModal() {
+        document.getElementById('create-user-modal').classList.remove('hidden');
+        document.getElementById('create-user-error').classList.add('hidden');
+    }
+
+    hideCreateUserModal() {
+        document.getElementById('create-user-modal').classList.add('hidden');
+        document.getElementById('create-user-form').reset();
+        document.getElementById('create-user-error').classList.add('hidden');
+    }
+
+    async loadAdminConfig() {
+        try {
+            const config = await this.apiCall('/admin/config');
+            document.getElementById('config-public-registration').checked = config.allow_public_registration;
+            document.getElementById('config-user-group-creation').checked = config.allow_user_group_creation;
+            document.getElementById('config-keep-history').checked = config.default_keep_history;
+            document.getElementById('config-max-file-size').value = config.max_file_size_mb;
+            document.getElementById('config-domain').value = config.domain;
+            document.getElementById('config-title').value = config.title;
+            document.getElementById('config-federation').checked = config.federation_enabled;
+            
+            // Update server info
+            document.getElementById('server-version').textContent = '0.1.0';
+            document.getElementById('server-domain').textContent = config.domain;
+            document.getElementById('server-db-type').textContent = 'SQLite';
+        } catch (error) {
+            console.error('Failed to load config:', error);
+        }
+    }
+
+    async saveConfig() {
+        const statusEl = document.getElementById('config-save-status');
+        
+        try {
+            const configData = {
+                allow_public_registration: document.getElementById('config-public-registration').checked,
+                allow_user_group_creation: document.getElementById('config-user-group-creation').checked,
+                default_keep_history: document.getElementById('config-keep-history').checked,
+                max_file_size_mb: parseInt(document.getElementById('config-max-file-size').value),
+                title: document.getElementById('config-title').value,
+                federation_enabled: document.getElementById('config-federation').checked
+            };
+            
+            await this.apiCall('/admin/config', 'PUT', configData);
+            
+            statusEl.textContent = 'Settings saved successfully!';
+            statusEl.className = 'save-status success';
+            setTimeout(() => {
+                statusEl.textContent = '';
+                statusEl.className = 'save-status';
+            }, 3000);
+        } catch (error) {
+            statusEl.textContent = error.message;
+            statusEl.className = 'save-status error';
+        }
+    }
+
+    async loadStats() {
+        try {
+            const stats = await this.apiCall('/admin/stats');
+            this.renderStats(stats);
+        } catch (error) {
+            console.error('Failed to load stats:', error);
+        }
+    }
+
+    renderStats(stats) {
+        // Update overview cards
+        document.getElementById('stat-total-users').textContent = stats.total_users;
+        document.getElementById('stat-total-chats').textContent = stats.total_chats;
+        document.getElementById('stat-total-messages').textContent = stats.total_messages;
+        document.getElementById('stat-storage').textContent = `${stats.storage_used_mb} MB`;
+        
+        // Update activity stats
+        document.getElementById('stat-active-24h').textContent = stats.active_users_24h;
+        document.getElementById('stat-active-7d').textContent = stats.active_users_7d;
+        document.getElementById('stat-active-30d').textContent = stats.active_users_30d;
+        
+        // Update uptime
+        const uptime = this.formatUptime(stats.uptime_seconds);
+        document.getElementById('stat-uptime').textContent = uptime;
+        
+        // Update user count in user tab
+        document.getElementById('total-users-count').textContent = `Total: ${stats.total_users}`;
+    }
+    
+    formatUptime(seconds) {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    async loadUsers(search = '') {
+        try {
+            const data = await this.apiCall(`/users?search=${search}`);
+            this.renderUserList(data.users);
+            document.getElementById('total-users-count').textContent = `Total: ${data.total}`;
+        } catch (error) {
+            console.error('Failed to load users:', error);
+        }
+    }
+
+    renderUserList(users) {
+        const container = document.getElementById('user-list');
+        container.innerHTML = '';
+
+        if (users.length === 0) {
+            container.innerHTML = '<p class="empty-message">No users found</p>';
+            return;
+        }
+
+        users.forEach(user => {
+            const div = document.createElement('div');
+            div.className = 'user-item';
+            
+            const onlineIndicator = user.is_active ? '<span class="presence-dot online"></span>' : '<span class="presence-dot"></span>';
+            
+            div.innerHTML = `
+                <div class="avatar">${this.getInitials(user.display_name)}</div>
+                <div class="user-item-info">
+                    <div class="user-item-name">${this.escapeHtml(user.display_name)} ${user.is_admin ? '👑' : ''}</div>
+                    <div class="user-item-email">@${this.escapeHtml(user.username)}#${this.escapeHtml(user.domain)}</div>
+                </div>
+                <div class="user-item-actions">
+                    ${user.is_active ? 
+                        `<button class="btn-secondary btn-small" onclick="app.deactivateUser('${user.id}')">Deactivate</button>` :
+                        `<button class="btn-primary btn-small" onclick="app.activateUser('${user.id}')">Activate</button>`
+                    }
+                </div>
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    async createBackup() {
+        const statusEl = document.getElementById('backup-status');
+        
+        try {
+            statusEl.textContent = 'Creating backup...';
+            statusEl.className = 'backup-status';
+            
+            const result = await this.apiCall('/admin/backup', 'POST');
+            
+            statusEl.textContent = `Backup created: ${result.backup_path}`;
+            statusEl.className = 'backup-status success';
+            
+            this.loadBackupList();
+            
+            setTimeout(() => {
+                statusEl.textContent = '';
+                statusEl.className = 'backup-status';
+            }, 5000);
+        } catch (error) {
+            statusEl.textContent = error.message;
+            statusEl.className = 'backup-status error';
+        }
+    }
+
+    loadBackupList() {
+        const container = document.getElementById('backup-list');
+        // For now, show a message about backups
+        container.innerHTML = `
+            <div class="backup-item">
+                <div>
+                    <div class="backup-name">Manual backup created</div>
+                    <div class="backup-date">Check data/backups folder</div>
+                </div>
+            </div>
+        `;
+    }
+
+    async loadLogs() {
+        const lines = document.getElementById('log-lines').value;
+        const container = document.getElementById('log-content');
+        
+        try {
+            const result = await this.apiCall(`/admin/logs?lines=${lines}`);
+            
+            if (result.logs && result.logs.length > 0) {
+                container.textContent = result.logs.join('');
+            } else {
+                container.textContent = 'No logs available';
+            }
+        } catch (error) {
+            container.textContent = `Error loading logs: ${error.message}`;
+        }
+    }
+
+    // Utility Methods
+    getInitials(name) {
+        if (!name) return '?';
+        return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+    }
+
+    escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    truncate(text, maxLength) {
+        if (!text) return '';
+        if (text.length <= maxLength) return text;
+        return text.slice(0, maxLength) + '...';
+    }
+
+    formatTime(timestamp) {
+        if (!timestamp) return '';
+        const date = new Date(timestamp);
+        const now = new Date();
+        
+        if (date.toDateString() === now.toDateString()) {
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+        
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        
+        if (date.toDateString() === yesterday.toDateString()) {
+            return 'Yesterday';
+        }
+        
+        return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+
+    scrollToBottom() {
+        const container = document.getElementById('messages-container');
+        container.scrollTop = container.scrollHeight;
+    }
+
+    updatePresence(userId, isOnline) {
+        this.onlineUsers[userId] = isOnline;
+        this.updateChatStatuses();
+        
+        if (this.currentChat && this.currentChat.type === 'direct') {
+            const otherMember = this.currentChat.members.find(m => m.user_id === userId);
+            if (otherMember) {
+                const statusEl = document.getElementById('chat-status');
+                statusEl.innerHTML = `<span class="presence-dot ${isOnline ? 'online' : ''}"></span> <span class="status-text">${isOnline ? 'online' : 'offline'}</span>`;
+            }
+        }
+    }
+}
+
+// Initialize app
+const app = new DeceMSGApp();
+ + msg.id + ':' + this.currentUser.domain,
+                        origin_server_ts: Date.parse(msg.created_at) || Date.now(),
                         sender: senderMatrixId,
-                        content: encryptedContent
+                        content: encryptedContent,
+                        unsigned: { age: 0 }
                     });
                     const decrypted = await this.e2ee.decryptMessage(
-                        this.roomIdForChat(this.currentChat),
+                        roomId,
                         encryptedEvent
                     );
                     displayContent = decrypted.body || decrypted.content?.body || '[Encrypted message]';
@@ -1199,17 +2050,23 @@ class DeceMSGApp {
                 throw new Error('E2EE is not ready');
             }
 
+            const roomState = await this.apiCall('/crypto/rooms/' + this.currentChat.id);
+            const roomId = this.roomIdForChat(this.currentChat, roomState.epoch);
             const recipient = await this.recipientMatrixUserId(this.currentChat);
             const encryptedEvent = await this.e2ee.encryptText(
                 this.currentChat.id,
-                this.roomIdForChat(this.currentChat),
+                roomId,
                 recipient,
                 content || 'Sent a message',
                 payload => this.sendCryptoRequest(payload)
             );
 
             await this.apiCall(`/chats/${this.currentChat.id}/messages`, 'POST', {
-                encrypted_content: encryptedEvent,
+                encrypted_content: JSON.stringify({
+                    decemsg_crypto_v: 1,
+                    room_id: roomId,
+                    event: JSON.parse(encryptedEvent)
+                }),
                 message_type: 'text'
             });
 
