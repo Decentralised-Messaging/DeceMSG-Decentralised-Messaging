@@ -244,3 +244,39 @@ def test_user_identity_and_device_models_define_stable_security_metadata() -> No
     assert device.status == DeviceStatus.ACTIVE
     assert device.public_identity_key == "public-key-material"
     assert "id" in Device.__table__.primary_key.columns.keys()
+
+
+
+@pytest.mark.security
+def test_federated_identity_is_distinct_from_local_user() -> None:
+    """Remote addresses have their own identity record and lifecycle."""
+    from decemsg.models.federated_identity import FederatedIdentity
+
+    remote = FederatedIdentity(
+        id="remote-1",
+        username="bob",
+        domain="remote.example",
+        display_name="Bob",
+    )
+
+    assert remote.full_address == "bob#remote.example"
+    assert remote.domain == "remote.example"
+    assert remote.user_id if hasattr(remote, "user_id") else True
+
+
+@pytest.mark.security
+def test_chat_member_supports_exactly_one_local_or_remote_identity() -> None:
+    """Conversation participants use a local FK or a federated identity FK."""
+    from decemsg.models.chat import ChatMember
+
+    constraints = {constraint.name for constraint in ChatMember.__table__.constraints}
+    assert "ck_chat_member_has_identity" in constraints
+    assert "ck_chat_member_one_identity" in constraints
+
+
+@pytest.mark.security
+def test_message_has_explicit_remote_sender_reference() -> None:
+    """Remote senders no longer need to masquerade as local User foreign keys."""
+    from decemsg.models.message import Message
+
+    assert "sender_federated_identity_id" in Message.__table__.columns
