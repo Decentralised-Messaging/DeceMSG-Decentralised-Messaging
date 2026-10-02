@@ -827,64 +827,47 @@ async def receive_delivery_receipt(
     db: AsyncSession = Depends(get_db),
     federation_auth: AuthResult = Depends(require_federation_auth),
 ):
-    """Receive a delivery receipt from a federated server.
-    
-    This endpoint:
-    1. Finds the original message
-    2. Updates its status
-    3. Notifies the sender via WebSocket
-    """
-    try:
-        if not _origin_actor(receipt.user_id, federation_auth.server_domain):
-            raise HTTPException(status_code=403, detail="Receipt actor is not owned by authenticated server")
-        if receipt.status not in {"delivered", "read"}:
-            raise HTTPException(status_code=400, detail="Invalid receipt status")
+    """Receive a receipt only from the server owning the recipient actor."""
+    if not _origin_actor(receipt.user_id, federation_auth.server_domain):
+        raise HTTPException(status_code=403, detail="Receipt actor is not owned by authenticated server")
+    if receipt.status not in {"delivered", "read"}:
+        raise HTTPException(status_code=400, detail="Invalid receipt status")
 
-        # Find the message
-        result = await db.execute(
-            select(Message).where(Message.id == receipt.message_id)
+    result = await db.execute(select(Message).where(Message.id == receipt.message_id))
+    message = result.scalar_one_or_none()
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if message.chat_id != receipt.chat_id:
+        raise HTTPException(status_code=403, detail="Receipt chat does not match message")
+    if "#" in (message.sender_id or ""):
+        raise HTTPException(status_code=403, detail="Receipt target is not a local sender")
+
+    member_result = await db.execute(
+        select(ChatMember).where(
+            ChatMember.chat_id == receipt.chat_id,
+            ChatMember.user_id == receipt.user_id,
         )
-        message = result.scalar_one_or_none()
-        
-        if message:
-            if message.chat_id != receipt.chat_id:
-                raise HTTPException(status_code=403, detail="Receipt chat does not match message")
-            if "#" in (message.sender_id or ""):
-                raise HTTPException(status_code=403, detail="Receipt target is not a local sender")
-            member_result = await db.execute(
-                select(ChatMember).where(
-                    ChatMember.chat_id == receipt.chat_id,
-                    ChatMember.user_id == receipt.user_id,
-                )
-            )
-            if member_result.scalar_one_or_none() is None:
-                raise HTTPException(status_code=403, detail="Receipt actor is not a chat member")
+    )
+    if member_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=403, detail="Receipt actor is not a chat member")
 
-            # Update message status
-            if receipt.status == "delivered":
-                message.is_delivered = True
-                message.delivered_at = datetime.now()
-            elif receipt.status == "read":
-                message.is_read = True
-                message.read_at = datetime.now()
-            
-            await db.commit()
-            
-            # Notify sender about receipt
-            try:
-                from decemsg.api.websocket import manager
-                import asyncio
-                asyncio.create_task(
-                    _notify_receipt(manager, message.sender_id, receipt)
-                )
-            except Exception as e:
-                print(f"Receipt notification failed: {e}")
-        
-        return {"status": "received"}
-        
+    if receipt.status == "delivered":
+        message.is_delivered = True
+        message.delivered_at = datetime.now()
+    else:
+        message.is_read = True
+        message.read_at = datetime.now()
+
+    await db.commit()
+
+    try:
+        from decemsg.api.websocket import manager
+        import asyncio
+        asyncio.create_task(_notify_receipt(manager, message.sender_id, receipt))
     except Exception as e:
-        print(f"Error processing receipt: {e}")
-        return {"status": "error", "message": str(e)}
+        print(f"Receipt notification failed: {e}")
+
+    return {"status": "received"}
 
 
 async def _notify_receipt(manager, sender_id: str, receipt: DeliveryReceipt):
