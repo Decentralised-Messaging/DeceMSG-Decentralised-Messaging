@@ -30,6 +30,7 @@ class AuthResult:
     is_authenticated: bool
     server_domain: Optional[str] = None
     public_key: Optional[str] = None
+    key_id: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -168,7 +169,8 @@ async def require_federation_auth(
     return AuthResult(
         is_authenticated=True,
         server_domain=server_domain,
-        public_key=public_key
+        public_key=public_key,
+        key_id=key_id
     )
 
 
