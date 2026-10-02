@@ -176,12 +176,11 @@ try {
 }
 
 const tampered = JSON.parse(encryptedEvent);
-tampered.content.ciphertext = Object.fromEntries(
-  Object.entries(tampered.content.ciphertext).map(([key, value]) => [
-    key,
-    { ...value, body: value.body.slice(0, -2) + "AA" },
-  ]),
-);
+const tamperedCiphertext = JSON.parse(JSON.stringify(tampered.content.ciphertext));
+const firstCiphertextKey = Object.keys(tamperedCiphertext)[0];
+tamperedCiphertext[firstCiphertextKey].body =
+  tamperedCiphertext[firstCiphertextKey].body.slice(0, -2) + "AA";
+tampered.content.ciphertext = tamperedCiphertext;
 
 try {
   await bob.decryptRoomEvent(
