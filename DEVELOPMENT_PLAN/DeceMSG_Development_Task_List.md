@@ -110,13 +110,21 @@ Ensure every protected federation endpoint passes through the intended authentic
 
 ### Acceptance Criteria
 
-- [ ] Federation authentication middleware is registered in application startup.
-- [ ] Every protected federation endpoint is covered.
-- [ ] Requests without federation credentials receive an authentication failure.
-- [ ] Invalid credentials are rejected.
-- [ ] Valid credentials reach the endpoint.
-- [ ] Middleware cannot be bypassed through alternate routes.
-- [ ] Tests cover every federation router group.
+- [x] Federation authentication middleware is registered in application startup.
+- [x] Every protected federation endpoint is covered.
+- [x] Requests without federation credentials receive an authentication failure.
+- [x] Invalid credentials are rejected.
+- [x] Valid credentials reach the endpoint.
+- [x] Middleware cannot be bypassed through alternate routes.
+- [x] Tests cover every federation router group.
+
+### Completion Notes
+
+- Federation middleware is registered in `create_app()`.
+- Federation routes are deny-by-default; only explicit protocol discovery/identity metadata paths are public.
+- Added route-level regression coverage that enumerates the federation router and verifies every non-public route rejects missing authentication.
+- Added positive middleware coverage proving a valid signed request reaches the protected handler.
+- Latest CI verification: **run #102** — test/static checks and security regression suite both passed.
 
 ---
 
