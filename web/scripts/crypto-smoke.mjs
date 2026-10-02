@@ -21,8 +21,12 @@ const bobUser = new UserId("@bob:example.com");
 const aliceDevice = new DeviceId("ALICE_DEVICE");
 const bobDevice = new DeviceId("BOB_DEVICE");
 
+const charlieUser = new UserId("@charlie:example.com");
+const charlieDevice = new DeviceId("CHARLIE_DEVICE");
+
 const alice = await OlmMachine.initialize(aliceUser, aliceDevice);
 const bob = await OlmMachine.initialize(bobUser, bobDevice);
+const charlie = await OlmMachine.initialize(charlieUser, charlieDevice);
 
 const bobRequests = await bob.outgoingRequests();
 const bobUpload = bobRequests.find((request) => request instanceof KeysUploadRequest);
@@ -155,6 +159,38 @@ const decrypted = await bob.decryptRoomEvent(
 const clearEvent = JSON.parse(decrypted.event);
 if (clearEvent.content?.body !== "DeceMSG E2EE smoke test") {
   throw new Error("Bob failed to decrypt Alice's ciphertext");
+}
+
+
+
+try {
+  await charlie.decryptRoomEvent(
+    encryptedEvent,
+    room,
+    new DecryptionSettings(),
+  );
+  throw new Error("Unauthorized Charlie device decrypted Alice's ciphertext");
+} catch (error) {
+  if (error?.code === undefined) throw error;
+}
+
+const tampered = JSON.parse(encryptedEvent);
+tampered.content.ciphertext = Object.fromEntries(
+  Object.entries(tampered.content.ciphertext).map(([key, value]) => [
+    key,
+    { ...value, body: value.body.slice(0, -2) + "AA" },
+  ]),
+);
+
+try {
+  await bob.decryptRoomEvent(
+    JSON.stringify(tampered),
+    room,
+    new DecryptionSettings(),
+  );
+  throw new Error("Tampered ciphertext was accepted");
+} catch (error) {
+  if (error?.code === undefined) throw error;
 }
 
 console.log("DeceMSG E2EE smoke test passed: Alice encrypted, Bob decrypted, and no server-side plaintext step was used.");
