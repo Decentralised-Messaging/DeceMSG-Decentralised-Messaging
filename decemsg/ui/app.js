@@ -641,7 +641,6 @@ class DeceMSGApp {
             this.device = await this.cryptoStore.ensureDevice(
                 publicIdentityKey => this.enrollBrowserDevice(publicIdentityKey)
             );
-            await this.initializeE2EE();
             await this.loadCurrentUser();
             this.showMainScreen();
         } catch (error) {
