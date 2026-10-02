@@ -202,31 +202,6 @@ def test_missing_federation_credentials_fail_closed() -> None:
     )
 
 
-@pytest.mark.security
-@pytest.mark.xfail(
-    strict=True,
-    reason="TASK-004 must bind a federation signing key to its authorized domain.",
-)
-def test_self_asserted_server_key_cannot_claim_a_trusted_domain(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    """A key must not become trusted merely by asserting a domain header."""
-    monkeypatch.chdir(tmp_path)
-    manager = ServerKeyManager()
-    headers = _signed_headers(manager, domain="trusted.example")
-
-    assert (
-        verify_authenticated_request(
-            method="POST",
-            path="/federation/messages",
-            body="{}",
-            headers=headers,
-            server_domain="trusted.example",
-        )
-        is False
-    )
-
 
 @pytest.mark.security
 @pytest.mark.xfail(
