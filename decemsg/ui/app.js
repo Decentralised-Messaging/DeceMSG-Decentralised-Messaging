@@ -310,6 +310,10 @@ class DeceMSGApp {
             throw new Error('Unauthorized');
         }
 
+        if (response.status === 204) {
+            return null;
+        }
+
         const data = await response.json();
         
         if (!response.ok) {
