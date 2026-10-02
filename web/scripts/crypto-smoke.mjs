@@ -21,25 +21,41 @@ const aliceUser = new UserId("@alice:example.com");
 const bobUser = new UserId("@bob:example.com");
 const aliceDevice = new DeviceId("ALICE_DEVICE");
 const bobDevice = new DeviceId("BOB_DEVICE");
+const bobSecondDevice = new DeviceId("BOB_DEVICE_2");
 
 const charlieUser = new UserId("@charlie:example.com");
 const charlieDevice = new DeviceId("CHARLIE_DEVICE");
 
 const alice = await OlmMachine.initialize(aliceUser, aliceDevice);
 const bob = await OlmMachine.initialize(bobUser, bobDevice);
+const bobSecond = await OlmMachine.initialize(bobUser, bobSecondDevice);
 const charlie = await OlmMachine.initialize(charlieUser, charlieDevice);
 
 const bobRequests = await bob.outgoingRequests();
 const bobUpload = bobRequests.find((request) => request instanceof KeysUploadRequest);
 if (!bobUpload) throw new Error("Bob did not produce a keys upload request");
-
 const bobUploadBody = JSON.parse(bobUpload.body);
-const bobOneTimeEntries = Object.entries(bobUploadBody.one_time_keys);
 await bob.markRequestAsSent(
   bobUpload.id,
   bobUpload.type,
   JSON.stringify({
-    one_time_key_counts: { signed_curve25519: bobOneTimeEntries.length },
+    one_time_key_counts: {
+      signed_curve25519: Object.keys(bobUploadBody.one_time_keys).length,
+    },
+  }),
+);
+
+const bobSecondRequests = await bobSecond.outgoingRequests();
+const bobSecondUpload = bobSecondRequests.find((request) => request instanceof KeysUploadRequest);
+if (!bobSecondUpload) throw new Error("Bob's second device did not produce a keys upload request");
+const bobSecondUploadBody = JSON.parse(bobSecondUpload.body);
+await bobSecond.markRequestAsSent(
+  bobSecondUpload.id,
+  bobSecondUpload.type,
+  JSON.stringify({
+    one_time_key_counts: {
+      signed_curve25519: Object.keys(bobSecondUploadBody.one_time_keys).length,
+    },
   }),
 );
 
@@ -50,26 +66,36 @@ await alice.markRequestAsSent(
     device_keys: {
       "@bob:example.com": {
         BOB_DEVICE: bobUploadBody.device_keys,
+        BOB_DEVICE_2: bobSecondUploadBody.device_keys,
       },
     },
     failures: {},
   }),
 );
 
-const claimRequest = await alice.getMissingSessions([bobUser]);
+const claimRequest = await alice.getMissingSessions([new UserId("@bob:example.com")]);
 if (!claimRequest) throw new Error("Alice did not request a Bob session");
 
-const [bobOneTimeId, bobOneTimeKey] = bobOneTimeEntries[0];
+const claimBody = JSON.parse(claimRequest.body);
+const oneTimeKeys = {};
+for (const [deviceId, algorithms] of Object.entries(
+  claimBody.one_time_keys["@bob:example.com"],
+)) {
+  const source = deviceId === "BOB_DEVICE" ? bobUploadBody : bobSecondUploadBody;
+  const requestedAlgorithm = Object.keys(algorithms)[0];
+  const matching = Object.entries(source.one_time_keys).find(([name]) =>
+    name.startsWith(requestedAlgorithm + ":"),
+  );
+  if (!matching) throw new Error("Missing one-time key for " + deviceId);
+  oneTimeKeys[deviceId] = { [matching[0]]: matching[1] };
+}
+
 await alice.markRequestAsSent(
   claimRequest.id,
   claimRequest.type,
   JSON.stringify({
     one_time_keys: {
-      "@bob:example.com": {
-        BOB_DEVICE: {
-          [bobOneTimeId]: bobOneTimeKey,
-        },
-      },
+      "@bob:example.com": oneTimeKeys,
     },
     failures: {},
   }),
