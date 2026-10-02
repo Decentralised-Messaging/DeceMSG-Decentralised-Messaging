@@ -10,7 +10,7 @@ from decemsg.core.database import get_db
 from decemsg.core.config import get_config
 from decemsg.federation.discovery import get_federation_client, ServerInfo
 from decemsg.federation.auth_middleware import AuthResult, require_federation_auth
-from decemsg.federation.events import verify_event_signature
+from decemsg.federation.events import FederationEventEnvelope, verify_event_signature
 from decemsg.models.user import User
 from decemsg.models.message import Message
 from decemsg.models.chat import Chat, ChatMember
@@ -90,7 +90,7 @@ class IncomingMessage(BaseModel):
     message_type: str = "text"
     encrypted: bool = True
     encryption_data: Optional[dict] = None
-    event: dict
+    event: FederationEventEnvelope
 
 
 class OutgoingMessage(BaseModel):
@@ -351,7 +351,7 @@ async def receive_message(
     config = get_config()
     _assert_origin_domain(message.from_domain, federation_auth)
 
-    event = message.event
+    event = message.event.model_dump()
     if (
         event.get("event_type") != "message"
         or event.get("protocol_version") != "1"
