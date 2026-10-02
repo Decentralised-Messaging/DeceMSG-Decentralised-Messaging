@@ -92,7 +92,8 @@ async def get_messages(
     # Build query
     query = select(Message).options(
         selectinload(Message.reactions),
-        selectinload(Message.sender)
+        selectinload(Message.sender),
+        selectinload(Message.sender_federated_identity)
     ).where(
         Message.chat_id == chat_id,
         Message.is_deleted == False
