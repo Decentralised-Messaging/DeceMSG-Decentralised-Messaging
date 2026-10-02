@@ -22,6 +22,7 @@ from decemsg.api import (
     messages_router,
     admin_router,
     websocket_router,
+    crypto_router,
 )
 from decemsg.federation import router as federation_router
 from decemsg.federation.auth_middleware import FederationAuthMiddleware
@@ -101,6 +102,7 @@ def create_app() -> FastAPI:
     app.include_router(messages_router)
     app.include_router(admin_router)
     app.include_router(websocket_router)
+    app.include_router(crypto_router)
     app.include_router(federation_router)
     
     # Root redirect to UI
