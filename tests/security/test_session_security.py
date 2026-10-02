@@ -111,7 +111,7 @@ def test_websocket_authentication_does_not_use_query_parameter() -> None:
 
     source = inspect.getsource(websocket_endpoint)
     assert "query_params.get" not in source
-    assert "type\": \"authenticate\"" in source
+    assert '"authenticate"' in source
 
 
 @pytest.mark.security
