@@ -274,6 +274,7 @@ async def send_message(
                 content=message_data.encrypted_content,
                 message_type=message_data.message_type.value,
                 conversation_id=chat_id,
+                db=db,
             )
             if result:
                 logger.info(f"Federated message sent from {from_username}@{from_domain} to {to_username}@{to_domain}")
