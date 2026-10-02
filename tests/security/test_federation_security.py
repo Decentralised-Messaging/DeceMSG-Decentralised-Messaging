@@ -114,6 +114,24 @@ async def test_protected_federation_endpoints_require_authentication(
 
 
 @pytest.mark.security
+def test_valid_federation_signature_is_accepted(tmp_path, monkeypatch) -> None:
+    """The baseline must prove that correctly signed federation requests work."""
+    monkeypatch.chdir(tmp_path)
+    manager = ServerKeyManager()
+    headers = _signed_headers(manager)
+
+    assert (
+        verify_authenticated_request(
+            method="POST",
+            path="/federation/messages",
+            body="{}",
+            headers=headers,
+        )
+        is True
+    )
+
+
+@pytest.mark.security
 def test_invalid_federation_signature_is_rejected(tmp_path, monkeypatch) -> None:
     """A malformed signature must never authenticate a federation request."""
     monkeypatch.chdir(tmp_path)
