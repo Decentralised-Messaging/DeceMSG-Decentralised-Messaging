@@ -198,6 +198,41 @@ async def get_current_user_info(
     )
 
 
+class PasswordChangeRequest(BaseModel):
+    """Request for an authenticated password change."""
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=6)
+
+
+@router.post("/change-password")
+async def change_password(
+    password_data: PasswordChangeRequest,
+    current_user: User = Depends(get_current_user),
+    current_session: UserSession = Depends(get_current_session),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change the account password after step-up verification."""
+    if current_session.user_id != current_user.id:
+        raise HTTPException(status_code=401, detail="Invalid session")
+
+    if not verify_password(password_data.current_password, current_user.password_hash):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+    if password_data.current_password == password_data.new_password:
+        raise HTTPException(
+            status_code=400,
+            detail="New password must differ from the current password",
+        )
+
+    current_user.password_hash = get_password_hash(password_data.new_password)
+    # Password changes intentionally do not revoke unrelated sessions or
+    # rotate device/message encryption keys. Recovery-key re-encryption is
+    # handled when the encrypted identity backup exists.
+    await db.commit()
+
+    return {"message": "Password changed successfully"}
+
+
 @router.post("/logout")
 async def logout(
     current_user: User = Depends(get_current_user),
