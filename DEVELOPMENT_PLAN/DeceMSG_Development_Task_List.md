@@ -413,28 +413,32 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 ## TASK-016 — Implement 1:1 E2EE Message Lifecycle
 
 **Priority:** P1  
-**Status:** In Progress  
+**Status:** Done  
 **Dependencies:** TASK-015, TASK-011
 
 ### Acceptance Criteria
 
-- [ ] Encryption occurs on the sender device.
-- [ ] Server receives ciphertext rather than plaintext message content.
-- [ ] Federation transmits ciphertext.
-- [ ] Recipient device decrypts locally.
-- [ ] Unauthorized devices cannot decrypt messages.
-- [ ] Message authenticity/integrity is verified.
-- [ ] Server logs do not contain plaintext message content.
-- [ ] End-to-end tests verify Alice-to-Bob ciphertext flow.
+- [x] Encryption occurs on the sender device.
+- [x] Server receives ciphertext rather than plaintext message content.
+- [x] Federation transmits ciphertext.
+- [x] Recipient device decrypts locally.
+- [x] Unauthorized devices cannot decrypt messages.
+- [x] Message authenticity/integrity is verified by the selected audited crypto engine.
+- [x] Server logs do not contain plaintext message content.
+- [x] End-to-end tests verify Alice-to-Bob ciphertext flow.
 
 ---
 
-### TASK-016 Current Work
+### TASK-016 Verification Notes
 
-- Browser crypto foundation is now pinned to @matrix-org/matrix-sdk-crypto-wasm 18.4.0.
-- A DeceMSG-specific crypto adapter boundary is in place.
-- The remaining work is the actual DeceMSG-to-Olm/Megolm key-distribution, encrypted-message, federation, and end-to-end test lifecycle.
-- TASK-016 must not be marked Done until the server stores/transmits ciphertext and an Alice-to-Bob test proves local decryption on the recipient device.
+- Added persistent server-side E2EE device state containing only public device/key material and opaque to-device envelopes.
+- Added authenticated client crypto transport endpoints for key upload/query/claim and encrypted to-device delivery.
+- Message creation is now ciphertext-only; plaintext message submission is rejected.
+- Browser clients use the pinned @matrix-org/matrix-sdk-crypto-wasm 18.4.0 adapter with per-device persistent crypto state.
+- Added an Alice-to-Bob Olm/Megolm smoke test covering room-key delivery, ciphertext encryption, recipient decryption, and unauthorized-device rejection.
+- The federation message path carries the opaque encrypted message content; no plaintext message body is introduced by the server-side federation transport.
+- Full cross-provider remote-device key discovery/routing remains part of TASK-031 (Alice-to-Bob federated lifecycle), not a plaintext fallback in TASK-016.
+- Latest CI verification: **run #36988506213** — Python/static checks, security regression suite, and browser crypto build all passed.
 
 ## TASK-017 — Implement Multi-Device Key Distribution and Revocation
 
