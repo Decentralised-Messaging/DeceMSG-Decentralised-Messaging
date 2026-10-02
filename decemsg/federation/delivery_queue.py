@@ -20,6 +20,37 @@ POLL_SECONDS = 1
 BACKOFF_SECONDS = (5, 15, 60, 300, 900, 1800, 3600, 7200)
 
 
+async def add_federation_delivery_job(
+    db,
+    *,
+    idempotency_key: str,
+    job_type: str,
+    destination_domain: str,
+    payload: dict,
+    max_attempts: int = 8,
+) -> FederationDeliveryJob:
+    """Add an outbound job to an existing transaction."""
+    existing = await db.execute(
+        select(FederationDeliveryJob).where(
+            FederationDeliveryJob.idempotency_key == idempotency_key
+        )
+    )
+    job = existing.scalar_one_or_none()
+    if job is not None:
+        return job
+
+    job = FederationDeliveryJob(
+        idempotency_key=idempotency_key,
+        job_type=job_type,
+        destination_domain=destination_domain,
+        payload=json.dumps(payload, separators=(",", ":"), ensure_ascii=False),
+        max_attempts=max(1, max_attempts),
+    )
+    db.add(job)
+    await db.flush()
+    return job
+
+
 async def enqueue_federation_delivery(
     *,
     idempotency_key: str,
