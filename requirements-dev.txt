@@ -1,0 +1,4 @@
+# Development and CI tooling
+pytest==8.3.5
+ruff==0.11.2
+pip-audit==2.9.0
