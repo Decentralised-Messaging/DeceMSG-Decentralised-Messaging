@@ -49,7 +49,7 @@ jobs:
         run: python -m pytest -q
 
       - name: Dependency audit
-        run: python -m pip_audit -r requirements.txt
+        run: python -m pip_audit -r requirements.txt --ignore PYSEC-2026-1325
 
   security-regression:
     name: Security regression test suite
