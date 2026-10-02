@@ -70,6 +70,7 @@ async def list_chats(
         select(ChatMember)
         .options(
             selectinload(ChatMember.chat).selectinload(Chat.members).selectinload(ChatMember.user),
+            selectinload(ChatMember.federated_identity),
             selectinload(ChatMember.chat).selectinload(Chat.messages)
         )
         .where(ChatMember.user_id == current_user.id)
@@ -173,7 +174,8 @@ async def create_chat(
         # Check if direct chat already exists
         result = await db.execute(
             select(Chat)
-            .options(selectinload(Chat.members).selectinload(ChatMember.user))
+            .options(selectinload(Chat.members).selectinload(ChatMember.user),
+            selectinload(ChatMember.federated_identity))
             .where(
                 Chat.type == ChatType.DIRECT,
                 Chat.is_active == True
@@ -290,7 +292,8 @@ async def create_chat(
     # Reload chat with members
     result = await db.execute(
         select(Chat)
-        .options(selectinload(Chat.members).selectinload(ChatMember.user))
+        .options(selectinload(Chat.members).selectinload(ChatMember.user),
+            selectinload(ChatMember.federated_identity))
         .where(Chat.id == chat.id)
     )
     chat = result.scalar_one()
@@ -327,7 +330,8 @@ async def get_chat(
     """Get chat details."""
     result = await db.execute(
         select(Chat)
-        .options(selectinload(Chat.members).selectinload(ChatMember.user))
+        .options(selectinload(Chat.members).selectinload(ChatMember.user),
+            selectinload(ChatMember.federated_identity))
         .where(Chat.id == chat_id)
     )
     chat = result.scalar_one_or_none()
@@ -379,7 +383,8 @@ async def update_chat(
     """Update chat details."""
     result = await db.execute(
         select(Chat)
-        .options(selectinload(Chat.members).selectinload(ChatMember.user))
+        .options(selectinload(Chat.members).selectinload(ChatMember.user),
+            selectinload(ChatMember.federated_identity))
         .where(Chat.id == chat_id)
     )
     chat = result.scalar_one_or_none()
@@ -441,7 +446,7 @@ async def add_member(
     """Add a member to a chat."""
     result = await db.execute(
         select(Chat)
-        .options(selectinload(Chat.members))
+        .options(selectinload(Chat.members).selectinload(ChatMember.federated_identity))
         .where(Chat.id == chat_id)
     )
     chat = result.scalar_one_or_none()
@@ -497,7 +502,7 @@ async def remove_member(
     """Remove a member from a chat."""
     result = await db.execute(
         select(Chat)
-        .options(selectinload(Chat.members))
+        .options(selectinload(Chat.members).selectinload(ChatMember.federated_identity))
         .where(Chat.id == chat_id)
     )
     chat = result.scalar_one_or_none()
