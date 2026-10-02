@@ -1,0 +1,15 @@
+{
+  "name": "decemsg-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reproducible DeceMSG browser crypto build",
+  "license": "Apache-2.0",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "verify-crypto-package": "node scripts/verify-crypto-package.mjs",
+    "build": "node scripts/build.mjs"
+  },
+  "dependencies": {
+    "@matrix-org/matrix-sdk-crypto-wasm": "18.4.0"
+  }
+}
