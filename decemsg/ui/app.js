@@ -1019,7 +1019,7 @@ class DeceMSGApp {
     async loadMessages(chatId) {
         try {
             const messages = await this.apiCall(`/chats/${chatId}/messages`);
-            this.renderMessages(messages);
+            await this.renderMessages(messages);
             this.scrollToBottom();
         } catch (error) {
             console.error('Failed to load messages:', error);
