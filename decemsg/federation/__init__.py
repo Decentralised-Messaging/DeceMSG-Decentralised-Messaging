@@ -10,6 +10,7 @@ from decemsg.core.database import get_db
 from decemsg.core.config import get_config
 from decemsg.federation.discovery import get_federation_client, ServerInfo
 from decemsg.federation.auth_middleware import AuthResult, require_federation_auth
+from decemsg.federation.events import verify_event_signature
 from decemsg.models.user import User
 from decemsg.models.message import Message
 from decemsg.models.chat import Chat, ChatMember
@@ -81,14 +82,15 @@ class FederationUserLookup(BaseModel):
 
 
 class IncomingMessage(BaseModel):
-    """Incoming federated message."""
+    """Incoming federated message with a mandatory signed event envelope."""
     from_user: str
     from_domain: str
     to_user: str
     content: str
     message_type: str = "text"
-    encrypted: bool = False
+    encrypted: bool = True
     encryption_data: Optional[dict] = None
+    event: dict
 
 
 class OutgoingMessage(BaseModel):
@@ -348,6 +350,24 @@ async def receive_message(
     """
     config = get_config()
     _assert_origin_domain(message.from_domain, federation_auth)
+
+    event = message.event
+    if (
+        event.get("event_type") != "message"
+        or event.get("protocol_version") != "1"
+        or event.get("origin_server") != message.from_domain
+        or event.get("origin_key_id") != federation_auth.key_id
+        or event.get("actor_identity") != f"{message.from_user}#{message.from_domain}"
+        or event.get("target_identity") != f"{message.to_user}#{config.server.domain}"
+        or event.get("conversation_id") is None
+        or not event.get("ciphertext")
+        or not federation_auth.public_key
+        or not verify_event_signature(event, federation_auth.public_key)
+    ):
+        raise HTTPException(status_code=401, detail="Invalid signed federation event")
+
+    message.content = event["ciphertext"]
+    message.message_type = event.get("message_type", message.message_type)
     
     # Find the recipient user
     result = await db.execute(
