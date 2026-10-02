@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Enum as SAEnum
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Enum as SAEnum, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from decemsg.core.database import Base
@@ -21,6 +21,9 @@ class Device(Base):
     """A stable per-client cryptographic device identity."""
 
     __tablename__ = "devices"
+    __table_args__ = (
+        UniqueConstraint("user_id", "public_identity_key", name="uq_device_user_public_key"),
+    )
 
     id: Mapped[str] = mapped_column(
         String(36),
