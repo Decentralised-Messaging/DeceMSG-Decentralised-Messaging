@@ -146,11 +146,12 @@ async def require_federation_auth(
     # If not, check headers and verify
     signature = request.headers.get("X-Server-Signature")
     timestamp = request.headers.get("X-Server-Timestamp")
+    request_id = request.headers.get("X-Server-Request-ID")
     public_key = request.headers.get("X-Server-Public-Key")
     key_id = request.headers.get("X-Server-Key-ID")
     server_domain = request.headers.get("X-Server-Domain")
     
-    if not all([signature, timestamp, public_key, key_id, server_domain]):
+    if not all([signature, timestamp, request_id, public_key, key_id, server_domain]):
         raise HTTPException(status_code=401, detail="Missing authentication headers")
     
     body = await request.body()
@@ -164,6 +165,7 @@ async def require_federation_auth(
         headers={
             "X-Server-Signature": signature,
             "X-Server-Timestamp": timestamp,
+            "X-Server-Request-ID": request_id,
             "X-Server-Public-Key": public_key,
             "X-Server-Key-ID": key_id,
             "X-Server-Domain": server_domain,
@@ -176,6 +178,7 @@ async def require_federation_auth(
         server_domain=server_domain,
         public_key=public_key,
         key_id=key_id,
+        request_id=request_id,
     )
 
 
