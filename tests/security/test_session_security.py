@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from decemsg.core.auth import create_access_token, get_current_session
+from decemsg.api.auth import PasswordChangeRequest, change_password
 from decemsg.models.session import UserSession
 
 
@@ -137,3 +138,76 @@ def test_multiple_sessions_remain_independent() -> None:
 
     current = asyncio.run(get_current_session(token, _SessionDB([second])))
     assert current.id == "session-2"
+
+
+@pytest.mark.security
+def test_password_change_requires_current_password() -> None:
+    """A stolen valid session alone must not authorize a password change."""
+    from decemsg.models.user import User
+
+    user = User(
+        id="user-1",
+        username="alice",
+        display_name="Alice",
+        password_hash="stored-hash",
+        domain="example.com",
+    )
+    session = UserSession(
+        id="session-1",
+        user_id="user-1",
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+    )
+
+    with pytest.raises(Exception) as exc:
+        asyncio.run(
+            change_password(
+                PasswordChangeRequest(
+                    current_password="wrong",
+                    new_password="new-password",
+                ),
+                user,
+                session,
+                _SessionDB([]),
+            )
+        )
+    assert getattr(exc.value, "status_code", None) == 401
+
+
+@pytest.mark.security
+def test_successful_password_change_preserves_session(monkeypatch) -> None:
+    """Changing the password does not revoke the current authentication session."""
+    from decemsg.models.user import User
+    import decemsg.api.auth as auth_api
+
+    user = User(
+        id="user-1",
+        username="alice",
+        display_name="Alice",
+        password_hash="stored-hash",
+        domain="example.com",
+    )
+    session = UserSession(
+        id="session-1",
+        user_id="user-1",
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+    )
+
+    monkeypatch.setattr(auth_api, "verify_password", lambda plain, stored: plain == "old")
+    monkeypatch.setattr(auth_api, "get_password_hash", lambda password: f"hash:{password}")
+    db = _SessionDB([])
+
+    result = asyncio.run(
+        change_password(
+            PasswordChangeRequest(
+                current_password="old",
+                new_password="new-password",
+            ),
+            user,
+            session,
+            db,
+        )
+    )
+
+    assert result["message"] == "Password changed successfully"
+    assert user.password_hash == "hash:new-password"
+    assert session.revoked_at is None
