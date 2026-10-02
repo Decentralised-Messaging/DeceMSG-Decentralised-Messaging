@@ -17,7 +17,6 @@ from decemsg.models.chat import Chat, ChatMember
 router = APIRouter()
 
 
-@router.websocket("/ws")
 async def _session_is_active(session_id: str, user_id: str) -> bool:
     session_factory = get_session_factory()
     async with session_factory() as db:
