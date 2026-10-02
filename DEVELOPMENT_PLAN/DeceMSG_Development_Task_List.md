@@ -387,30 +387,33 @@ Implement password-assisted recovery without storing plaintext private keys serv
 
 ### Scope
 
-Select a mature, reviewed messaging cryptographic protocol rather than inventing cryptography.
+Select a mature, reviewed messaging cryptographic implementation that is compatible with the DeceMSG Apache-2.0 distribution model and browser-first client.
 
 ### Acceptance Criteria
 
-- [ ] Protocol/library choice is documented with rationale.
-- [ ] Security properties are documented.
-- [ ] Supported platforms are identified.
-- [ ] 1:1, multi-device, group, offline, rotation, and revocation requirements are mapped.
-- [ ] Key lifecycle is documented.
-- [ ] Recovery implications are documented.
-- [ ] No custom cryptographic primitive is introduced without independent review.
+- [x] Protocol/library choice is documented with rationale.
+- [x] Security properties are documented.
+- [x] Supported platforms are identified.
+- [x] 1:1, multi-device, group, offline, rotation, and revocation requirements are mapped.
+- [x] Key lifecycle is documented.
+- [x] Recovery implications are documented.
+- [x] No custom cryptographic primitive is introduced without independent review.
 
 ---
 
 ### TASK-015 Verification Notes
 
-- Selected the Signal Protocol family and documented the required security properties and lifecycle mapping.
-- Latest CI verification: **run #100** — test/static checks and security regression suite both passed.
-- Exact browser binding, build pipeline, and license compatibility are intentionally a release gate before integrating a concrete libsignal package.
+- Revisited the earlier Signal-family selection because official libsignal is AGPL-3.0-only and its upstream documentation says use outside Signal is unsupported.
+- Selected @matrix-org/matrix-sdk-crypto-wasm 18.4.0 as the Apache-2.0 browser crypto engine for the integration spike, behind a DeceMSG-specific adapter.
+- Added an exact npm lockfile, package verification, browser crypto staging build, and CI gate.
+- Version 18.4.0 is intentionally pinned because the documented 18.5.0/18.6.0 one-time-key regression affects the required E2EE path.
+- Added DEVELOPMENT_PLAN/E2EE_Crypto_Selection.md with protocol mapping, lifecycle requirements, versioning, recovery, device, and licensing rules.
+- Latest CI verification will be recorded after the new web-crypto job completes.
 
 ## TASK-016 — Implement 1:1 E2EE Message Lifecycle
 
 **Priority:** P1  
-**Status:** Blocked  
+**Status:** In Progress  
 **Dependencies:** TASK-015, TASK-011
 
 ### Acceptance Criteria
@@ -426,17 +429,12 @@ Select a mature, reviewed messaging cryptographic protocol rather than inventing
 
 ---
 
-### TASK-016 Blocker
+### TASK-016 Current Work
 
-The maintained browser-capable Signal implementation needs to be integrated through a reproducible frontend build/bundling pipeline and its AGPL licensing must be reviewed for compatibility with the project's distribution model. The repository currently has a static vanilla-JS client and no frontend package/build pipeline. Implementing a custom Web Crypto replacement would violate TASK-015's prohibition on custom messaging cryptography.
-
-#### Blocker verification — 2026-10-02
-
-- DeceMSG is currently distributed under **Apache-2.0** (repository `LICENSE`).
-- The current official Signal `libsignal` repository exposes a TypeScript API, but its repository is licensed **AGPL-3.0-only** and states that use outside Signal is unsupported. ([official libsignal README](https://github.com/signalapp/libsignal), [Cargo license metadata](https://github.com/signalapp/libsignal/blob/main/Cargo.toml))
-- An August 2026 upstream issue specifically asks Signal for guidance on using current libsignal in a new messenger, including licensing and distribution questions; no project-level licensing decision should be inferred from that issue. ([upstream licensing discussion](https://github.com/signalapp/libsignal/issues/691))
-- Therefore the implementation is intentionally **not** replacing the Apache-2.0 project license or embedding libsignal without an explicit licensing decision.
-- A technically viable Apache-2.0 alternative exists in the Matrix ecosystem: `@matrix-org/matrix-sdk-crypto-wasm` is a browser-oriented WebAssembly binding and is published under Apache-2.0. It implements the Olm/Megolm-based Matrix E2EE state machine, so adopting it would require revisiting TASK-015's Signal-family selection and the protocol mapping rather than silently substituting a different cryptographic protocol. ([matrix-sdk-crypto-wasm](https://github.com/matrix-org/matrix-sdk-crypto-wasm), [npm package](https://www.npmjs.com/package/@matrix-org/matrix-sdk-crypto-wasm))
+- Browser crypto foundation is now pinned to @matrix-org/matrix-sdk-crypto-wasm 18.4.0.
+- A DeceMSG-specific crypto adapter boundary is in place.
+- The remaining work is the actual DeceMSG-to-Olm/Megolm key-distribution, encrypted-message, federation, and end-to-end test lifecycle.
+- TASK-016 must not be marked Done until the server stores/transmits ciphertext and an Alice-to-Bob test proves local decryption on the recipient device.
 
 ## TASK-017 — Implement Multi-Device Key Distribution and Revocation
 
