@@ -6,7 +6,12 @@ import pytest
 from unittest.mock import AsyncMock
 
 from decemsg.core.auth import create_access_token, get_current_session, validate_login_device
-from decemsg.api.auth import PasswordChangeRequest, change_password
+from decemsg.api.auth import (
+    PasswordChangeRequest,
+    RecoveryBackupRequest,
+    change_password,
+    put_recovery_backup,
+)
 from decemsg.models.session import UserSession
 
 
@@ -304,3 +309,40 @@ def test_revoked_device_cannot_create_a_new_bound_session() -> None:
     with pytest.raises(Exception) as exc:
         asyncio.run(validate_login_device(db, "user-1", "device-1"))
     assert getattr(exc.value, "status_code", None) == 403
+
+
+
+@pytest.mark.security
+def test_recovery_backup_requires_argon2id_and_opaque_ciphertext() -> None:
+    """Recovery storage accepts only an Argon2id-derived encrypted envelope."""
+    import base64
+    from decemsg.models.user import User
+
+    user = User(
+        id="user-1",
+        username="alice",
+        display_name="Alice",
+        password_hash="stored-hash",
+        domain="example.com",
+    )
+    db = AsyncMock()
+    db.execute.return_value = _Result(None)
+
+    backup = RecoveryBackupRequest(
+        version=1,
+        kdf_algorithm="argon2id",
+        kdf_memory_kib=19456,
+        kdf_iterations=2,
+        kdf_parallelism=1,
+        kdf_salt=base64.b64encode(b"0123456789abcdef").decode(),
+        encryption_algorithm="AES-256-GCM",
+        encryption_nonce=base64.b64encode(b"0123456789ab").decode(),
+        ciphertext=base64.b64encode(b"opaque-ciphertext-material" * 2).decode(),
+    )
+
+    result = asyncio.run(put_recovery_backup(backup, user, db))
+    assert result["status"] == "stored"
+    assert result["version"] == 1
+    stored = db.add.call_args.args[0]
+    assert "private_key" not in stored.__dict__
+    assert stored.ciphertext == backup.ciphertext
