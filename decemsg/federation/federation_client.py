@@ -5,6 +5,7 @@ from datetime import datetime
 
 from decemsg.core.config import get_config
 from decemsg.federation.discovery import get_federation_client, ServerInfo
+from decemsg.federation.events import build_message_event
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,8 @@ async def route_message(
     from_user: str,
     to_user: str,
     content: str,
-    message_type: str = "text"
+    message_type: str = "text",
+    conversation_id: str = "",
 ) -> bool:
     """Route a message to a federated server if needed.
     
@@ -97,13 +99,21 @@ async def route_message(
     
     try:
         client = get_federation_client()
+        event = build_message_event(
+            actor_identity=f"{from_username}#{from_domain}",
+            target_identity=f"{to_username}#{to_domain}",
+            conversation_id=conversation_id,
+            ciphertext=content,
+            message_type=message_type,
+        )
         success = await client.send_message(
             from_user=from_username,
             from_domain=from_domain,
             to_user=to_username,
             to_domain=to_domain,
             content=content,
-            message_type=message_type
+            message_type=message_type,
+            event=event,
         )
         
         if success:
