@@ -28,8 +28,14 @@ router = APIRouter(prefix="/api", tags=["Messages"])
 
 # Request/Response Models
 class MessageCreate(BaseModel):
-    """Message creation request."""
-    content: str = Field(..., min_length=1)
+    """Message creation request.
+
+    New message submission is ciphertext-only. The plaintext content field is
+    retained only for backwards-compatible response typing and is rejected
+    during creation.
+    """
+    content: str | None = Field(None, min_length=1)
+    encrypted_content: str | None = Field(None, min_length=1, max_length=1_000_000)
     message_type: MessageType = MessageType.TEXT
     reply_to_id: str | None = None
 
@@ -206,11 +212,23 @@ async def send_message(
             detail="Not a member of this chat"
         )
     
-    # Create message
+    if not message_data.encrypted_content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="E2EE ciphertext is required for message creation",
+        )
+
+    if message_data.message_type != MessageType.TEXT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only encrypted text messages are currently supported",
+        )
+
+    # The server persists and broadcasts only the opaque encrypted event.
     message = Message(
         chat_id=chat_id,
         sender_id=current_user.id,
-        content=message_data.content,
+        content=message_data.encrypted_content,
         message_type=message_data.message_type,
         reply_to_id=message_data.reply_to_id,
     )
@@ -253,7 +271,7 @@ async def send_message(
             result = await route_message(
                 from_user=current_user.id,
                 to_user=member.user_id,
-                content=message_data.content,
+                content=message_data.encrypted_content,
                 message_type=message_data.message_type.value
             )
             if result:
