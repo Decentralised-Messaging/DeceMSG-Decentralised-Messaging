@@ -121,7 +121,7 @@ await bob.markRequestAsSent(
 
 const room = new RoomId("!decemsg-smoke:example.com");
 
-for (const machine of [alice, bob]) {
+for (const machine of [alice, bob, bobSecond]) {
   const settings = new RoomSettings();
   settings.algorithm = EncryptionAlgorithm.MegolmV1AesSha2;
   settings.onlyAllowTrustedDevices = false;
@@ -143,22 +143,29 @@ for (const request of keyShareRequests) {
     throw new Error("Unexpected room-key request type");
   }
   const body = JSON.parse(request.body);
-  const rawContent = body.messages["@bob:example.com"]["BOB_DEVICE"];
-  if (!rawContent) throw new Error("Room-key share did not target Bob");
-  const content = typeof rawContent === "string" ? JSON.parse(rawContent) : rawContent;
-
-  const toDeviceEvent = {
-    sender: "@alice:example.com",
-    type: String(request.event_type),
-    content,
-  };
-  const processed = await bob.receiveSyncChanges(
-    JSON.stringify([toDeviceEvent]),
-    new DeviceLists(),
-    new Map(),
-  );
-  if (processed.length !== 1 || processed[0].type !== ProcessedToDeviceEventType.Decrypted) {
-    throw new Error("Bob did not decrypt the room-key to-device event");
+  for (const [deviceId, machine] of [
+    ["BOB_DEVICE", bob],
+    ["BOB_DEVICE_2", bobSecond],
+  ]) {
+    const rawContent = body.messages["@bob:example.com"][deviceId];
+    if (!rawContent) throw new Error("Room-key share did not target " + deviceId);
+    const content = typeof rawContent === "string" ? JSON.parse(rawContent) : rawContent;
+    const toDeviceEvent = {
+      sender: "@alice:example.com",
+      type: String(request.event_type),
+      content,
+    };
+    const processed = await machine.receiveSyncChanges(
+      JSON.stringify([toDeviceEvent]),
+      new DeviceLists(),
+      new Map(),
+    );
+    if (
+      processed.length !== 1 ||
+      processed[0].type !== ProcessedToDeviceEventType.Decrypted
+    ) {
+      throw new Error(deviceId + " did not decrypt the room-key to-device event");
+    }
   }
 }
 
@@ -177,15 +184,19 @@ const encryptedEvent = JSON.stringify({
   unsigned: { age: 0 },
 });
 
-const decrypted = await bob.decryptRoomEvent(
-  encryptedEvent,
-  room,
-  new DecryptionSettings(),
-);
-
-const clearEvent = JSON.parse(decrypted.event);
-if (clearEvent.content?.body !== "DeceMSG E2EE smoke test") {
-  throw new Error("Bob failed to decrypt Alice's ciphertext");
+for (const [deviceId, machine] of [
+  ["BOB_DEVICE", bob],
+  ["BOB_DEVICE_2", bobSecond],
+]) {
+  const decrypted = await machine.decryptRoomEvent(
+    encryptedEvent,
+    room,
+    new DecryptionSettings(),
+  );
+  const clearEvent = JSON.parse(decrypted.event);
+  if (clearEvent.content?.body !== "DeceMSG E2EE smoke test") {
+    throw new Error(deviceId + " failed to decrypt Alice's ciphertext");
+  }
 }
 
 
