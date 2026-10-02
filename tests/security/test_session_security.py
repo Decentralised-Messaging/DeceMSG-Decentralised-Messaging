@@ -235,6 +235,7 @@ def test_user_identity_and_device_models_define_stable_security_metadata() -> No
         name="Alice Laptop",
         platform="web",
         public_identity_key="public-key-material",
+        status=DeviceStatus.ACTIVE,
     )
 
     assert identity.username == "alice"
