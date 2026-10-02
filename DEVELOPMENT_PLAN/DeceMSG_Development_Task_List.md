@@ -489,6 +489,16 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 
 # Phase 6 — Federation Event Protocol and Reliability
 
+### TASK-018 Current Work
+
+- Browser group encryption now establishes sessions for every authorized local group member.
+- Server key discovery is scoped to chat membership, and to-device delivery is scoped to active devices.
+- Chat membership changes rotate the per-chat crypto epoch.
+- The E2EE smoke suite covers multiple authorized devices and exclusion of a removed device after rotation.
+- Remaining acceptance work: offline/retry behavior and replay/duplicate handling; the latter is intentionally aligned with TASK-019/TASK-020 rather than duplicated.
+
+---
+
 ## TASK-019 — Define Signed Federation Event Envelope
 
 **Priority:** P2  
