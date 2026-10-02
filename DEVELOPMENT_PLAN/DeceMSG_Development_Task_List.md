@@ -502,7 +502,7 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 ## TASK-019 — Define Signed Federation Event Envelope
 
 **Priority:** P2  
-**Status:** Planned  
+**Status:** In Progress  
 **Dependencies:** TASK-005, TASK-011, TASK-016
 
 ### Acceptance Criteria
@@ -514,6 +514,16 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 - [ ] Protocol versioning is explicit.
 - [ ] Schema validation rejects malformed events.
 - [ ] Compatibility/versioning rules are documented.
+
+---
+
+### TASK-019 Current Work
+
+- Added the versioned signed event envelope and deterministic canonical serialization.
+- Federation message ingress now requires an event envelope and verifies the event signature against the authenticated origin server key.
+- Federation message egress signs the ciphertext event and uses authenticated server transport.
+- Added tamper-rejection and canonicalization security regression tests.
+- Replay, duplicate, and durable idempotency behavior is intentionally deferred to TASK-020.
 
 ---
 
