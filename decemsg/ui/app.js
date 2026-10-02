@@ -1,3 +1,123 @@
+class BrowserCryptoStore {
+    constructor() {
+        this.dbName = 'decemsg-crypto';
+        this.storeName = 'device';
+        this.keyId = 'primary-device';
+    }
+
+    open() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(this.dbName, 1);
+            request.onupgradeneeded = () => {
+                const db = request.result;
+                if (!db.objectStoreNames.contains(this.storeName)) {
+                    db.createObjectStore(this.storeName, { keyPath: 'id' });
+                }
+            };
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async getDevice() {
+        const db = await this.open();
+        return new Promise((resolve, reject) => {
+            const request = db.transaction(this.storeName, 'readonly')
+                .objectStore(this.storeName)
+                .get(this.keyId);
+            request.onsuccess = () => resolve(request.result || null);
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async saveDevice(device) {
+        const db = await this.open();
+        return new Promise((resolve, reject) => {
+            const request = db.transaction(this.storeName, 'readwrite')
+                .objectStore(this.storeName)
+                .put({ ...device, id: this.keyId });
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async clearDevice() {
+        const db = await this.open();
+        return new Promise((resolve, reject) => {
+            const request = db.transaction(this.storeName, 'readwrite')
+                .objectStore(this.storeName)
+                .delete(this.keyId);
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async createDeviceKey() {
+        if (!window.crypto?.subtle) {
+            throw new Error('Web Crypto API is required for device security');
+        }
+
+        const keyPair = await window.crypto.subtle.generateKey(
+            {
+                name: 'ECDSA',
+                namedCurve: 'P-256'
+            },
+            false,
+            ['sign', 'verify']
+        );
+
+        const publicKey = await window.crypto.subtle.exportKey(
+            'spki',
+            keyPair.publicKey
+        );
+
+        const bytes = new Uint8Array(publicKey);
+        let binary = '';
+        bytes.forEach(byte => { binary += String.fromCharCode(byte); });
+
+        return {
+            keyPair,
+            publicIdentityKey: btoa(binary)
+        };
+    }
+
+    async ensureDevice(enroll) {
+        let device = await this.getDevice();
+        if (device?.deviceId && device.privateKey) {
+            return device;
+        }
+
+        const generated = await this.createDeviceKey();
+        const registered = await enroll(generated.publicIdentityKey);
+
+        device = {
+            deviceId: registered.id,
+            privateKey: generated.keyPair.privateKey,
+            publicKey: generated.keyPair.publicKey,
+            createdAt: new Date().toISOString()
+        };
+        await this.saveDevice(device);
+        return device;
+    }
+
+    async sign(data) {
+        const device = await this.getDevice();
+        if (!device?.privateKey) {
+            throw new Error('Browser device key is not enrolled');
+        }
+
+        const bytes = new TextEncoder().encode(data);
+        return window.crypto.subtle.sign(
+            {
+                name: 'ECDSA',
+                hash: 'SHA-256'
+            },
+            device.privateKey,
+            bytes
+        );
+    }
+}
+
 // DeceMSG - Frontend Application - Phase 2
 
 class DeceMSGApp {
@@ -14,6 +134,8 @@ class DeceMSGApp {
         this.selectedFile = null;
         this.selectedMessage = null;
         this.pendingMembers = [];
+        this.cryptoStore = new BrowserCryptoStore();
+        this.device = null;
         
         this.init();
     }
@@ -351,31 +473,47 @@ class DeceMSGApp {
             formData.append('username', username);
             formData.append('password', password);
 
+            const existingDevice = await this.cryptoStore.getDevice();
+            const headers = {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            };
+            if (existingDevice?.deviceId) {
+                headers['X-Device-ID'] = existingDevice.deviceId;
+            }
+
             const response = await fetch(`${this.apiBase}/auth/login`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                },
+                headers,
                 body: formData
             });
 
             const data = await response.json();
-            
             if (!response.ok) {
                 throw new Error(data.detail || 'Login failed');
             }
 
             this.token = data.access_token;
             localStorage.setItem('token', this.token);
-            
+
+            this.device = await this.cryptoStore.ensureDevice(
+                publicIdentityKey => this.enrollBrowserDevice(publicIdentityKey)
+            );
+
             await this.loadCurrentUser();
             this.showMainScreen();
             errorEl.classList.add('hidden');
-
         } catch (error) {
             errorEl.textContent = error.message;
             errorEl.classList.remove('hidden');
         }
+    }
+
+    async enrollBrowserDevice(publicIdentityKey) {
+        return this.apiCall('/auth/devices', 'POST', {
+            name: 'Browser',
+            platform: 'web',
+            public_identity_key: publicIdentityKey
+        });
     }
 
     async handleRegister() {
