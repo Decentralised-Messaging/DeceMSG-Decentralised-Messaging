@@ -47,6 +47,17 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan"
     )
+    identity: Mapped["UserIdentity | None"] = relationship(
+        "UserIdentity",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    devices: Mapped[list["Device"]] = relationship(
+        "Device",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     
     @property
     def full_address(self) -> str:
@@ -73,3 +84,7 @@ class User(Base):
 # Import at bottom to avoid circular imports
 from decemsg.models.message import Message
 from decemsg.models.chat import ChatMember
+
+
+from decemsg.models.identity import UserIdentity
+from decemsg.models.device import Device
