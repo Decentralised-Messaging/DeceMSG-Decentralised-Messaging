@@ -38,4 +38,4 @@ class UserIdentity(Base):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    user: Mapped["User"] = relationship("User", backref="identity")
+    user: Mapped["User"] = relationship("User", back_populates="identity")
