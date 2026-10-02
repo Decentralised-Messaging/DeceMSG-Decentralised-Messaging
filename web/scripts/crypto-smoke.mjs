@@ -150,7 +150,7 @@ for (const machine of [alice, bob, bobSecond]) {
 
 const keyShareRequests = await alice.shareRoomKey(
   room,
-  [new UserId("@bob:example.com")],
+  [new UserId("@bob:example.com"), new UserId("@charlie:example.com")],
   new EncryptionSettings(),
 );
 
@@ -163,29 +163,32 @@ for (const request of keyShareRequests) {
     throw new Error("Unexpected room-key request type");
   }
   const body = JSON.parse(request.body);
-  for (const [deviceId, machine] of [
+  const machinesByDevice = new Map([
     ["BOB_DEVICE", bob],
     ["BOB_DEVICE_2", bobSecond],
     ["CHARLIE_DEVICE", charlie],
-  ]) {
-    const rawContent = body.messages["@bob:example.com"][deviceId];
-    if (!rawContent) throw new Error("Room-key share did not target " + deviceId);
-    const content = typeof rawContent === "string" ? JSON.parse(rawContent) : rawContent;
-    const toDeviceEvent = {
-      sender: "@alice:example.com",
-      type: String(request.event_type),
-      content,
-    };
-    const processed = await machine.receiveSyncChanges(
-      JSON.stringify([toDeviceEvent]),
-      new DeviceLists(),
-      new Map(),
-    );
-    if (
-      processed.length !== 1 ||
-      processed[0].type !== ProcessedToDeviceEventType.Decrypted
-    ) {
-      throw new Error(deviceId + " did not decrypt the room-key to-device event");
+  ]);
+  for (const devices of Object.values(body.messages)) {
+    for (const [deviceId, rawContent] of Object.entries(devices)) {
+      const machine = machinesByDevice.get(deviceId);
+      if (!machine) continue;
+      const content = typeof rawContent === "string" ? JSON.parse(rawContent) : rawContent;
+      const toDeviceEvent = {
+        sender: "@alice:example.com",
+        type: String(request.event_type),
+        content,
+      };
+      const processed = await machine.receiveSyncChanges(
+        JSON.stringify([toDeviceEvent]),
+        new DeviceLists(),
+        new Map(),
+      );
+      if (
+        processed.length !== 1 ||
+        processed[0].type !== ProcessedToDeviceEventType.Decrypted
+      ) {
+        throw new Error(deviceId + " did not decrypt the room-key to-device event");
+      }
     }
   }
 }
