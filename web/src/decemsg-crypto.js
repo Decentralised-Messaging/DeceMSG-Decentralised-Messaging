@@ -1,6 +1,8 @@
 import {
   DeviceId,
   OlmMachine,
+  RoomId,
+  StoreHandle,
   UserId,
   initAsync,
 } from "../vendor/matrix-sdk-crypto-wasm/index.mjs";
@@ -9,19 +11,23 @@ const CRYPTO_STORE_PREFIX = "decemsg-e2ee-v1";
 
 export class DeceMSGCrypto {
   #machine = null;
+  #store = null;
   #roomLocks = new Map();
 
   async initialize(userId, deviceId, storePassphrase) {
     await initAsync();
+
     const matrixUserId = new UserId(userId);
     const matrixDeviceId = new DeviceId(deviceId);
     const storeName = CRYPTO_STORE_PREFIX + "-" + deviceId;
-    this.#machine = await OlmMachine.initialize(
+
+    this.#store = await StoreHandle.open(storeName, storePassphrase);
+    this.#machine = await OlmMachine.initFromStore(
       matrixUserId,
       matrixDeviceId,
-      storeName,
-      storePassphrase,
+      this.#store,
     );
+
     return {
       userId: this.#machine.userId.toString(),
       deviceId: this.#machine.deviceId.toString(),
@@ -40,32 +46,60 @@ export class DeceMSGCrypto {
   async close() {
     this.#machine?.close();
     this.#machine = null;
+    this.#store?.free();
+    this.#store = null;
   }
 
   async encryptEvent(roomId, eventType, content) {
     const machine = this.#requireMachine();
+    const matrixRoomId = new RoomId(roomId);
     return this.#withRoomLock(roomId, async () =>
-      machine.encryptRoomEvent(roomId, eventType, JSON.stringify(content))
+      machine.encryptRoomEvent(
+        matrixRoomId,
+        eventType,
+        JSON.stringify(content),
+      )
     );
   }
 
   async decryptEvent(roomId, encryptedEvent, decryptionSettings) {
+    const matrixRoomId = new RoomId(roomId);
     return this.#requireMachine().decryptRoomEvent(
       encryptedEvent,
-      roomId,
+      matrixRoomId,
       decryptionSettings,
     );
   }
 
-  async shareRoomKey(roomId, users, encryptionSettings) {
-    const machine = this.#requireMachine();
-    return this.#withRoomLock(roomId, async () =>
-      machine.shareRoomKey(roomId, users, encryptionSettings)
+  async outgoingRequests() {
+    return this.#requireMachine().outgoingRequests();
+  }
+
+  async markRequestAsSent(requestId, requestType, response) {
+    return this.#requireMachine().markRequestAsSent(
+      requestId,
+      requestType,
+      response,
     );
   }
 
-  async sign(message) {
-    return this.#requireMachine().sign(message);
+  async receiveToDeviceEvents(events, changedUsers = []) {
+    const machine = this.#requireMachine();
+    const payload = JSON.stringify(
+      events.map((event) => ({
+        type: event.event_type,
+        sender: event.sender_user_id,
+        content:
+          typeof event.content === "string"
+            ? JSON.parse(event.content)
+            : event.content,
+      })),
+    );
+    return machine.receiveSyncChanges(
+      payload,
+      { changed: changedUsers, left: [] },
+      new Map(),
+    );
   }
 
   #requireMachine() {
@@ -80,7 +114,9 @@ export class DeceMSGCrypto {
     try {
       return await current;
     } finally {
-      if (this.#roomLocks.get(roomId) === current) this.#roomLocks.delete(roomId);
+      if (this.#roomLocks.get(roomId) === current) {
+        this.#roomLocks.delete(roomId);
+      }
     }
   }
 }
