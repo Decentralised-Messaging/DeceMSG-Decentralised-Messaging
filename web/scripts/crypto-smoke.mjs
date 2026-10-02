@@ -141,8 +141,11 @@ const encryptedContent = await alice.encryptRoomEvent(
 
 const encryptedEvent = JSON.stringify({
   type: "m.room.encrypted",
+  event_id: "$smoke:example.com",
+  origin_server_ts: Date.now(),
   sender: "@alice:example.com",
   content: JSON.parse(encryptedContent),
+  unsigned: { age: 0 },
 });
 
 let decrypted;
@@ -157,7 +160,7 @@ try {
   throw error;
 }
 
-const clearEvent = JSON.parse(decrypted.clearEvent);
+const clearEvent = JSON.parse(decrypted.event);
 if (clearEvent.content?.body !== "DeceMSG E2EE smoke test") {
   throw new Error("Bob failed to decrypt Alice's ciphertext");
 }
