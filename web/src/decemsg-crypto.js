@@ -1,13 +1,44 @@
 import {
+  DecryptionSettings,
   DeviceId,
+  DeviceLists,
+  EncryptionAlgorithm,
+  EncryptionSettings,
+  EncryptionInfo,
+  EncryptionAlgorithm as CryptoEncryptionAlgorithm,
+  KeysClaimRequest,
+  KeysQueryRequest,
+  KeysUploadRequest,
   OlmMachine,
+  RequestType,
   RoomId,
+  RoomSettings,
   StoreHandle,
+  ToDeviceRequest,
   UserId,
   initAsync,
 } from "../vendor/matrix-sdk-crypto-wasm/index.mjs";
 
 const CRYPTO_STORE_PREFIX = "decemsg-e2ee-v1";
+
+function requestDescriptor(request) {
+  if (request instanceof KeysUploadRequest) {
+    return { requestType: "keys_upload", eventType: null };
+  }
+  if (request instanceof KeysQueryRequest) {
+    return { requestType: "keys_query", eventType: null };
+  }
+  if (request instanceof KeysClaimRequest) {
+    return { requestType: "keys_claim", eventType: null };
+  }
+  if (request instanceof ToDeviceRequest) {
+    return {
+      requestType: "to_device",
+      eventType: request.eventType,
+    };
+  }
+  throw new Error("Unsupported crypto request type: " + request.type);
+}
 
 export class DeceMSGCrypto {
   #machine = null;
@@ -38,9 +69,102 @@ export class DeceMSGCrypto {
     return this.#machine !== null;
   }
 
-  get identityKeys() {
-    if (!this.#machine) throw new Error("DeceMSG crypto is not initialized");
-    return this.#machine.identityKeys;
+  async initializeRoom(roomIdText) {
+    const roomId = new RoomId(roomIdText);
+    const settings = new RoomSettings();
+    settings.algorithm = EncryptionAlgorithm.MegolmV1AesSha2;
+    settings.onlyAllowTrustedDevices = false;
+    await this.#machine.setRoomSettings(roomId, settings);
+    return roomId;
+  }
+
+  async ensureRecipientSession(chatId, roomIdText, recipientUserId, sendRequest) {
+    const roomId = await this.initializeRoom(roomIdText);
+    const recipient = new UserId(recipientUserId);
+
+    await this.#machine.updateTrackedUsers([recipient]);
+    await this.flushRequests(chatId, sendRequest);
+
+    const missing = await this.#machine.getMissingSessions([recipient]);
+    if (missing) {
+      await this.#sendRequest(chatId, missing, sendRequest);
+    }
+
+    const shareRequests = await this.#machine.shareRoomKey(
+      roomId,
+      [recipient],
+      new EncryptionSettings(),
+    );
+    for (const request of shareRequests) {
+      await this.#sendRequest(chatId, request, sendRequest);
+    }
+
+    return roomId;
+  }
+
+  async encryptText(chatId, roomIdText, recipientUserId, plaintext, sendRequest) {
+    const roomId = await this.ensureRecipientSession(
+      chatId,
+      roomIdText,
+      recipientUserId,
+      sendRequest,
+    );
+    const event = await this.#machine.encryptRoomEvent(
+      roomId,
+      "m.room.message",
+      JSON.stringify({
+        msgtype: "m.text",
+        body: plaintext,
+      }),
+    );
+    return event;
+  }
+
+  async decryptMessage(roomIdText, encryptedEvent) {
+    const roomId = new RoomId(roomIdText);
+    const decrypted = await this.#machine.decryptRoomEvent(
+      encryptedEvent,
+      roomId,
+      new DecryptionSettings(),
+    );
+    return JSON.parse(decrypted.clearEvent);
+  }
+
+  async flushRequests(chatId, sendRequest) {
+    const requests = await this.#machine.outgoingRequests();
+    for (const request of requests) {
+      await this.#sendRequest(chatId, request, sendRequest);
+    }
+  }
+
+  async receiveToDeviceEvents(events, sendRequest) {
+    const payload = JSON.stringify(
+      events.map((event) => ({
+        sender: event.sender,
+        type: event.event_type,
+        content:
+          typeof event.content === "string"
+            ? JSON.parse(event.content)
+            : event.content,
+      })),
+    );
+
+    const changedDevices = new DeviceLists();
+    const processed = await this.#machine.receiveSyncChanges(
+      payload,
+      changedDevices,
+      new Map(),
+    );
+
+    await this.flushRequests(null, sendRequest);
+    return processed;
+  }
+
+  async sign(message) {
+    if (!this.#machine) {
+      throw new Error("DeceMSG crypto is not initialized");
+    }
+    return this.#machine.sign(message);
   }
 
   async close() {
@@ -50,73 +174,25 @@ export class DeceMSGCrypto {
     this.#store = null;
   }
 
-  async encryptEvent(roomId, eventType, content) {
-    const machine = this.#requireMachine();
-    const matrixRoomId = new RoomId(roomId);
-    return this.#withRoomLock(roomId, async () =>
-      machine.encryptRoomEvent(
-        matrixRoomId,
-        eventType,
-        JSON.stringify(content),
-      )
+  async #sendRequest(chatId, request, sendRequest) {
+    const descriptor = requestDescriptor(request);
+    const response = await sendRequest({
+      request_type: descriptor.requestType,
+      request_id: request.id,
+      body: JSON.parse(request.body),
+      event_type: descriptor.eventType,
+      chat_id: chatId,
+    });
+
+    await this.#machine.markRequestAsSent(
+      request.id,
+      request.type,
+      JSON.stringify(response),
     );
+    return response;
   }
+}
 
-  async decryptEvent(roomId, encryptedEvent, decryptionSettings) {
-    const matrixRoomId = new RoomId(roomId);
-    return this.#requireMachine().decryptRoomEvent(
-      encryptedEvent,
-      matrixRoomId,
-      decryptionSettings,
-    );
-  }
-
-  async outgoingRequests() {
-    return this.#requireMachine().outgoingRequests();
-  }
-
-  async markRequestAsSent(requestId, requestType, response) {
-    return this.#requireMachine().markRequestAsSent(
-      requestId,
-      requestType,
-      response,
-    );
-  }
-
-  async receiveToDeviceEvents(events, changedUsers = []) {
-    const machine = this.#requireMachine();
-    const payload = JSON.stringify(
-      events.map((event) => ({
-        type: event.event_type,
-        sender: event.sender_user_id,
-        content:
-          typeof event.content === "string"
-            ? JSON.parse(event.content)
-            : event.content,
-      })),
-    );
-    return machine.receiveSyncChanges(
-      payload,
-      { changed: changedUsers, left: [] },
-      new Map(),
-    );
-  }
-
-  #requireMachine() {
-    if (!this.#machine) throw new Error("DeceMSG crypto is not initialized");
-    return this.#machine;
-  }
-
-  async #withRoomLock(roomId, operation) {
-    const previous = this.#roomLocks.get(roomId) ?? Promise.resolve();
-    const current = previous.then(operation, operation);
-    this.#roomLocks.set(roomId, current);
-    try {
-      return await current;
-    } finally {
-      if (this.#roomLocks.get(roomId) === current) {
-        this.#roomLocks.delete(roomId);
-      }
-    }
-  }
+if (typeof window !== "undefined") {
+  window.DeceMSGCrypto = DeceMSGCrypto;
 }
