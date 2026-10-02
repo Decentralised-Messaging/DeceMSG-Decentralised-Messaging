@@ -56,8 +56,9 @@ def _origin_actor(user_id: str, origin_domain: str) -> bool:
 
 def _message_origin_actor(message: Message) -> str | None:
     """Return the canonical actor address represented by a message."""
-    if message.sender_federated_identity is not None:
-        return message.sender_federated_identity.full_address
+    remote_identity = getattr(message, "sender_federated_identity", None)
+    if remote_identity is not None:
+        return remote_identity.full_address
     return message.sender_id
 
 
