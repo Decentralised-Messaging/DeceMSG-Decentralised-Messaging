@@ -887,10 +887,11 @@ async def receive_delivery_receipt(
     if "#" in (message.sender_id or ""):
         raise HTTPException(status_code=403, detail="Receipt target is not a local sender")
 
+    receipt_identity = await _get_or_create_federated_identity(db, receipt.user_id)
     member_result = await db.execute(
         select(ChatMember).where(
             ChatMember.chat_id == receipt.chat_id,
-            ChatMember.user_id == receipt.user_id,
+            ChatMember.federated_identity_id == receipt_identity.id,
         )
     )
     if member_result.scalar_one_or_none() is None:
@@ -1088,15 +1089,18 @@ async def receive_typing_indicator(
         raise HTTPException(status_code=403, detail="Typing actor is not owned by authenticated server")
 
     result = await db.execute(
-        select(ChatMember).where(ChatMember.chat_id == typing.chat_id)
+        select(ChatMember)
+        .options(selectinload(ChatMember.federated_identity))
+        .where(ChatMember.chat_id == typing.chat_id)
     )
     members = result.scalars().all()
-    if not any(member.user_id == typing.user_id for member in members):
+    typing_identity = await _get_or_create_federated_identity(db, typing.user_id)
+    if not any(member.federated_identity_id == typing_identity.id for member in members):
         raise HTTPException(status_code=403, detail="Typing actor is not a chat member")
 
     from decemsg.api.websocket import manager
     for member in members:
-        if not is_federated_user(member.user_id):
+        if member.user_id:
             await manager.send_personal_message(
                 {
                     "type": "typing_indicator",
