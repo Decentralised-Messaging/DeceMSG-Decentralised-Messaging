@@ -100,3 +100,40 @@ def test_token_without_session_id_is_rejected() -> None:
     with pytest.raises(Exception) as exc:
         asyncio.run(get_current_session(token, _SessionDB([])))
     assert getattr(exc.value, "status_code", None) == 401
+
+
+
+@pytest.mark.security
+def test_websocket_authentication_does_not_use_query_parameter() -> None:
+    """Bearer tokens must not be accepted from the WebSocket URL."""
+    import inspect
+    from decemsg.api.websocket import websocket_endpoint
+
+    source = inspect.getsource(websocket_endpoint)
+    assert "query_params.get" not in source
+    assert "type\": \"authenticate\"" in source
+
+
+@pytest.mark.security
+def test_multiple_sessions_remain_independent() -> None:
+    """Revoking one session does not revoke another session."""
+    now = datetime.utcnow()
+    first = UserSession(
+        id="session-1",
+        user_id="user-1",
+        expires_at=now + timedelta(hours=1),
+    )
+    second = UserSession(
+        id="session-2",
+        user_id="user-1",
+        expires_at=now + timedelta(hours=1),
+    )
+    token = create_access_token(
+        {"sub": "user-1", "sid": "session-2"},
+        expires_delta=timedelta(hours=1),
+    )
+
+    first.revoked_at = now
+
+    current = asyncio.run(get_current_session(token, _SessionDB([second])))
+    assert current.id == "session-2"
