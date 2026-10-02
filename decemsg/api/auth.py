@@ -18,6 +18,7 @@ from decemsg.core.auth import (
     create_access_token,
     get_current_session,
     get_current_user,
+    validate_login_device,
 )
 from decemsg.core.config import get_config
 from decemsg.core.rate_limiter import limiter, get_login_rate_limit
@@ -113,18 +114,11 @@ async def login(
     access_token_expires = timedelta(hours=config.auth.jwt_expiry_hours)
     expires_at = datetime.utcnow() + access_token_expires
     requested_device_id = request.headers.get("X-Device-ID")
-    device_id = None
-    if requested_device_id:
-        device_result = await db.execute(
-            select(Device).where(
-                Device.id == requested_device_id,
-                Device.user_id == user.id,
-            )
-        )
-        device = device_result.scalar_one_or_none()
-        if device is None or device.status != DeviceStatus.ACTIVE or device.revoked_at is not None:
-            raise HTTPException(status_code=403, detail="Device is revoked or not registered")
-        device_id = device.id
+    device_id = await validate_login_device(
+        db,
+        user.id,
+        requested_device_id,
+    )
 
     session = UserSession(
         user_id=user.id,
