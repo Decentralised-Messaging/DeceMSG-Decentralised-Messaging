@@ -36,27 +36,22 @@ class AuthResult:
 class FederationAuthMiddleware(BaseHTTPMiddleware):
     """Middleware to verify federation request authentication."""
     
-    # Paths that require federation authentication
-    PROTECTED_PATHS = [
-        "/federation/messages",
-        "/federation/chats",
-        "/federation/receipts",
-        "/federation/files",
-        "/federation/typing",
-        "/federation/blocks",
-        "/federation/profile",
-    ]
-    
-    # Paths that are public (discovery, info)
-    PUBLIC_PATHS = [
-        "/federation/.well-known",
-        "/federation/users",
-        "/federation/keys",
-        "/federation/servers",
-        "/federation/lookup",
-        "/federation/send",
-    ]
-    
+    # Federation defaults to authenticated. Only protocol discovery/public
+    # identity metadata is exempted. This deny-by-default policy prevents a
+    # newly added federation endpoint from accidentally becoming unauthenticated.
+    PUBLIC_PATHS = (
+        "/federation/.well-known/",
+        "/federation/users/",
+        "/federation/keys/",
+        "/federation/lookup/",
+        "/federation/health",
+        "/federation/actor",
+        "/federation/discovery",
+        "/federation/srv/records",
+        "/federation/srv/zone-file",
+        "/federation/verify/challenge",
+    )
+
     async def dispatch(self, request: Request, call_next):
         """Process the request with authentication check."""
         path = request.url.path
@@ -65,16 +60,11 @@ class FederationAuthMiddleware(BaseHTTPMiddleware):
         if not path.startswith("/federation/"):
             return await call_next(request)
         
-        # Check if path is public
-        for public_path in self.PUBLIC_PATHS:
-            if path.startswith(public_path):
-                return await call_next(request)
-        
-        # Check if path requires auth
-        requires_auth = any(path.startswith(p) for p in self.PROTECTED_PATHS)
-        
-        if not requires_auth:
+        # Only explicit public protocol metadata/discovery routes bypass auth.
+        if any(path.startswith(public_path) for public_path in self.PUBLIC_PATHS):
             return await call_next(request)
+        
+        # Every other federation route is protected by default.
         
         # Get authentication headers
         signature = request.headers.get("X-Server-Signature")
