@@ -3,7 +3,9 @@
 import base64
 import json
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 from uuid import uuid4
 
 from cryptography.hazmat.primitives import hashes, serialization
@@ -15,6 +17,27 @@ from decemsg.federation.server_auth import get_key_manager
 
 
 PROTOCOL_VERSION = "1"
+
+
+
+class FederationEventEnvelope(BaseModel):
+    """Validated wire schema for a signed federation event."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str = Field(..., min_length=1, max_length=255)
+    event_type: Literal["message"]
+    protocol_version: Literal["1"]
+    origin_server: str = Field(..., min_length=1, max_length=255)
+    origin_key_id: str = Field(..., min_length=1, max_length=255)
+    actor_identity: str = Field(..., min_length=3, max_length=511)
+    target_identity: str = Field(..., min_length=3, max_length=511)
+    conversation_id: str = Field(..., min_length=1, max_length=255)
+    created_at: str = Field(..., min_length=1, max_length=64)
+    sequence: int = Field(..., ge=0)
+    message_type: str = Field(..., min_length=1, max_length=64)
+    ciphertext: str = Field(..., min_length=1, max_length=1_000_000)
+    signature: str = Field(..., min_length=1, max_length=1024)
 
 
 def canonical_event_bytes(event: dict[str, Any]) -> bytes:
