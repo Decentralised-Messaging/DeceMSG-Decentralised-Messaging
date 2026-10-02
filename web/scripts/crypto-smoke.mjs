@@ -1,5 +1,6 @@
 import {
   DeviceId,
+  DecryptionSettings,
   DeviceLists,
   EncryptionAlgorithm,
   EncryptionSettings,
@@ -8,6 +9,7 @@ import {
   KeysUploadRequest,
   OlmMachine,
   RequestType,
+  ToDeviceRequest,
   RoomId,
   RoomSettings,
   UserId,
@@ -105,7 +107,7 @@ if (keyShareRequests.length === 0) {
 }
 
 for (const request of keyShareRequests) {
-  if (!(request instanceof (await import("@matrix-org/matrix-sdk-crypto-wasm")).ToDeviceRequest)) {
+  if (!(request instanceof ToDeviceRequest)) {
     throw new Error("Unexpected room-key request type");
   }
   const body = JSON.parse(request.body);
@@ -140,7 +142,7 @@ const encryptedEvent = JSON.stringify({
 const decrypted = await bob.decryptRoomEvent(
   encryptedEvent,
   room,
-  new (await import("@matrix-org/matrix-sdk-crypto-wasm")).DecryptionSettings(),
+  new DecryptionSettings(),
 );
 
 const clearEvent = JSON.parse(decrypted.clearEvent);
