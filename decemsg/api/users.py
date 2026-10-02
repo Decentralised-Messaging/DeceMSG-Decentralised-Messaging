@@ -37,7 +37,6 @@ class UserUpdate(BaseModel):
     """User update request."""
     display_name: str | None = Field(None, min_length=1, max_length=100)
     avatar_url: str | None = None
-    password: str | None = Field(None, min_length=6)
     is_active: bool | None = None
 
 
@@ -290,8 +289,6 @@ async def update_user(
         user.display_name = update_data.display_name
     if update_data.avatar_url is not None:
         user.avatar_url = update_data.avatar_url
-    if update_data.password is not None:
-        user.password_hash = get_password_hash(update_data.password)
     if update_data.is_active is not None and current_user.is_admin:
         user.is_active = update_data.is_active
     
