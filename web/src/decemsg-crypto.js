@@ -4,8 +4,6 @@ import {
   DeviceLists,
   EncryptionAlgorithm,
   EncryptionSettings,
-  EncryptionInfo,
-  EncryptionAlgorithm as CryptoEncryptionAlgorithm,
   KeysClaimRequest,
   KeysQueryRequest,
   KeysUploadRequest,
@@ -156,7 +154,6 @@ export class DeceMSGCrypto {
       new Map(),
     );
 
-    await this.flushRequests(null, sendRequest);
     return processed;
   }
 
