@@ -101,7 +101,7 @@ for (const machine of [alice, bob]) {
 
 const keyShareRequests = await alice.shareRoomKey(
   room,
-  [bobUser],
+  [new UserId("@bob:example.com")],
   new EncryptionSettings(),
 );
 
