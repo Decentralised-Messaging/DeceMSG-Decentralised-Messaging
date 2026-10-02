@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from decemsg.core.config import get_config
 from decemsg.core.database import get_db
+from decemsg.models.session import UserSession
 
 # OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -72,39 +73,69 @@ def decode_token(token: str) -> dict:
         )
 
 
-async def get_current_user(
+async def get_current_session(
     token: str = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_db)
-):
-    """Get current authenticated user from token."""
-    from decemsg.models.user import User
-    
+    db: AsyncSession = Depends(get_db),
+) -> UserSession:
+    """Validate a JWT and its corresponding revocable server-side session."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
+
     try:
         payload = decode_token(token)
-        user_id: str = payload.get("sub")
-        if user_id is None:
+        user_id = payload.get("sub")
+        session_id = payload.get("sid")
+        if not user_id or not session_id:
             raise credentials_exception
     except HTTPException:
         raise credentials_exception
-    
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    
-    if user is None:
+
+    result = await db.execute(
+        select(UserSession).where(
+            UserSession.id == session_id,
+            UserSession.user_id == user_id,
+        )
+    )
+    session = result.scalar_one_or_none()
+    if session is None:
         raise credentials_exception
-    
+
+    now = datetime.utcnow()
+    if session.revoked_at is not None or session.expires_at <= now:
+        raise credentials_exception
+
+    session.last_seen_at = now
+    return session
+
+
+async def get_current_user(
+    current_session: UserSession = Depends(get_current_session),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the active user represented by a non-revoked session."""
+    from decemsg.models.user import User
+
+    result = await db.execute(
+        select(User).where(User.id == current_session.user_id)
+    )
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is deactivated"
+            detail="User account is deactivated",
         )
-    
+
     return user
 
 
