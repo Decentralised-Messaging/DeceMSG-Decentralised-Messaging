@@ -1,5 +1,5 @@
 """DeceMSG authentication API endpoints."""
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
@@ -15,11 +15,13 @@ from decemsg.core.auth import (
     verify_password,
     get_password_hash,
     create_access_token,
+    get_current_session,
     get_current_user,
 )
 from decemsg.core.config import get_config
 from decemsg.core.rate_limiter import limiter, get_login_rate_limit
 from decemsg.models.user import User
+from decemsg.models.session import UserSession
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
@@ -104,13 +106,24 @@ async def login(
             detail="User account is deactivated"
         )
     
-    # Create access token
+    # Create a revocable server-side session and bind the JWT to it.
     access_token_expires = timedelta(hours=config.auth.jwt_expiry_hours)
-    access_token = create_access_token(
-        data={"sub": user.id},
-        expires_delta=access_token_expires
+    expires_at = datetime.utcnow() + access_token_expires
+    session = UserSession(
+        user_id=user.id,
+        expires_at=expires_at,
+        user_agent=request.headers.get("user-agent"),
+        ip_address=request.client.host if request.client else None,
     )
-    
+    db.add(session)
+    await db.flush()
+
+    access_token = create_access_token(
+        data={"sub": user.id, "sid": session.id},
+        expires_delta=access_token_expires,
+    )
+    await db.commit()
+
     return {"access_token": access_token, "token_type": "bearer"}
 
 
@@ -186,6 +199,67 @@ async def get_current_user_info(
 
 
 @router.post("/logout")
-async def logout(current_user: User = Depends(get_current_user)):
-    """Logout current user (client should discard token)."""
+async def logout(
+    current_user: User = Depends(get_current_user),
+    current_session: UserSession = Depends(get_current_session),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke the current server-side session."""
+    if current_session.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
+    current_session.revoked_at = datetime.utcnow()
+    await db.commit()
     return {"message": "Successfully logged out"}
+
+
+@router.get("/sessions")
+async def list_sessions(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List active sessions without exposing bearer credentials."""
+    result = await db.execute(
+        select(UserSession)
+        .where(
+            UserSession.user_id == current_user.id,
+            UserSession.revoked_at.is_(None),
+            UserSession.expires_at > datetime.utcnow(),
+        )
+        .order_by(UserSession.created_at.desc())
+    )
+    sessions = result.scalars().all()
+    return {
+        "sessions": [
+            {
+                "id": session.id,
+                "device_id": session.device_id,
+                "created_at": session.created_at.isoformat(),
+                "expires_at": session.expires_at.isoformat(),
+                "last_seen_at": session.last_seen_at.isoformat(),
+                "user_agent": session.user_agent,
+                "ip_address": session.ip_address,
+            }
+            for session in sessions
+        ]
+    }
+
+
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_session(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke one of the current user's sessions."""
+    result = await db.execute(
+        select(UserSession).where(
+            UserSession.id == session_id,
+            UserSession.user_id == current_user.id,
+        )
+    )
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.revoked_at is None:
+        session.revoked_at = datetime.utcnow()
+        await db.commit()
