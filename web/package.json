@@ -7,6 +7,7 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "verify-crypto-package": "node scripts/verify-crypto-package.mjs",
+    "crypto-smoke": "node scripts/crypto-smoke.mjs",
     "build": "node scripts/build.mjs"
   },
   "dependencies": {
