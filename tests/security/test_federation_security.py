@@ -18,6 +18,7 @@ from starlette.responses import Response
 
 from decemsg.federation.auth_middleware import AuthResult, FederationAuthMiddleware
 from decemsg.main import app
+from decemsg.federation import router as federation_router
 from decemsg.federation import (
     ChatSyncRequest,
     DeliveryReceipt,
@@ -133,6 +134,56 @@ def test_federation_auth_middleware_is_registered() -> None:
         middleware.cls is FederationAuthMiddleware
         for middleware in app.user_middleware
     )
+
+
+@pytest.mark.security
+def test_every_non_public_federation_route_requires_authentication() -> None:
+    """All federation router groups are deny-by-default protected."""
+    public_prefixes = FederationAuthMiddleware.PUBLIC_PATHS
+    middleware = FederationAuthMiddleware(AsyncMock())
+
+    routes = [
+        route
+        for route in federation_router.routes
+        if getattr(route, "path", "").startswith("/federation/")
+    ]
+    assert routes
+
+    for route in routes:
+        path = route.path
+        if any(path.startswith(prefix) for prefix in public_prefixes):
+            continue
+
+        methods = sorted(getattr(route, "methods", {"GET"}))
+        method = methods[0]
+        response = asyncio.run(_dispatch(_request(path, method), middleware))
+        assert response.status_code == 401, (
+            f"Federation route {method} {path} bypassed authentication"
+        )
+
+
+@pytest.mark.security
+def test_valid_authenticated_request_reaches_protected_handler(tmp_path, monkeypatch) -> None:
+    """A valid signed request passes middleware to the endpoint handler."""
+    monkeypatch.chdir(tmp_path)
+    manager = ServerKeyManager()
+    headers = _signed_headers(manager)
+    request = _request(
+        "/federation/messages",
+        "POST",
+        body=b"{}",
+        headers=headers,
+    )
+    call_next = AsyncMock(return_value=Response(status_code=204))
+    middleware = FederationAuthMiddleware(AsyncMock())
+
+    response = asyncio.run(middleware.dispatch(request, call_next))
+
+    assert response.status_code == 204
+    call_next.assert_awaited_once()
+    auth = request.state.federation_auth
+    assert auth.is_authenticated is True
+    assert auth.server_domain == "remote.example"
 
 
 @pytest.mark.security
