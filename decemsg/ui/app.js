@@ -319,6 +319,23 @@ class DeceMSGApp {
         return data;
     }
 
+    // Device management contract
+    async listDevices() {
+        return this.apiCall('/auth/devices');
+    }
+
+    async enrollDevice(name, platform, publicIdentityKey) {
+        return this.apiCall('/auth/devices', 'POST', {
+            name,
+            platform,
+            public_identity_key: publicIdentityKey
+        });
+    }
+
+    async revokeDevice(deviceId) {
+        return this.apiCall(`/auth/devices/${deviceId}`, 'DELETE');
+    }
+
     // Authentication
     async handleLogin() {
         const username = document.getElementById('login-username').value;
