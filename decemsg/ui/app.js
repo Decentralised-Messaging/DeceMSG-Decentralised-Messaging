@@ -84,6 +84,14 @@ class BrowserCryptoStore {
     async ensureDevice(enroll) {
         let device = await this.getDevice();
         if (device?.deviceId && device.privateKey) {
+            if (!device.cryptoStorePassphrase) {
+                const storeKeyBytes = new Uint8Array(32);
+                window.crypto.getRandomValues(storeKeyBytes);
+                let storeKeyBinary = '';
+                storeKeyBytes.forEach(byte => { storeKeyBinary += String.fromCharCode(byte); });
+                device.cryptoStorePassphrase = btoa(storeKeyBinary);
+                await this.saveDevice(device);
+            }
             return device;
         }
 
