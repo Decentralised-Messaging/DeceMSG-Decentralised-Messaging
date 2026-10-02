@@ -311,8 +311,15 @@ async def get_to_device_events(
     events = result.scalars().all()
 
     sender_ids = {event.sender_user_id for event in events}
-    sender_result = await db.execute(select(User).where(User.id.in_(sender_ids))) if sender_ids else None
-    sender_map = {user.id: _matrix_user_id(user) for user in (sender_result.scalars().all() if sender_result else [])}
+    sender_result = (
+        await db.execute(select(User).where(User.id.in_(sender_ids)))
+        if sender_ids
+        else None
+    )
+    sender_map = {
+        user.id: _matrix_user_id(user)
+        for user in (sender_result.scalars().all() if sender_result else [])
+    }
 
     return {
         "events": [
@@ -327,6 +334,8 @@ async def get_to_device_events(
             for event in events
         ]
     }
+
+
 @router.post("/to-device/ack")
 async def acknowledge_to_device_events(
     event_ids: list[str],
