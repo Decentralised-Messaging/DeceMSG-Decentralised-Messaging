@@ -90,10 +90,16 @@ class BrowserCryptoStore {
         const generated = await this.createDeviceKey();
         const registered = await enroll(generated.publicIdentityKey);
 
+        const storeKeyBytes = new Uint8Array(32);
+        window.crypto.getRandomValues(storeKeyBytes);
+        let storeKeyBinary = '';
+        storeKeyBytes.forEach(byte => { storeKeyBinary += String.fromCharCode(byte); });
+
         device = {
             deviceId: registered.id,
             privateKey: generated.keyPair.privateKey,
             publicKey: generated.keyPair.publicKey,
+            cryptoStorePassphrase: btoa(storeKeyBinary),
             createdAt: new Date().toISOString()
         };
         await this.saveDevice(device);
@@ -136,6 +142,8 @@ class DeceMSGApp {
         this.pendingMembers = [];
         this.cryptoStore = new BrowserCryptoStore();
         this.device = null;
+        this.e2ee = null;
+        this.e2eeReady = false;
         
         this.init();
     }
@@ -498,6 +506,7 @@ class DeceMSGApp {
             this.device = await this.cryptoStore.ensureDevice(
                 publicIdentityKey => this.enrollBrowserDevice(publicIdentityKey)
             );
+            await this.initializeE2EE();
 
             await this.loadCurrentUser();
             this.showMainScreen();
@@ -514,6 +523,64 @@ class DeceMSGApp {
             platform: 'web',
             public_identity_key: publicIdentityKey
         });
+    }
+
+    async initializeE2EE() {
+        if (!this.device?.deviceId || !this.device?.cryptoStorePassphrase) {
+            throw new Error('Encrypted device storage is not initialized');
+        }
+        if (!window.DeceMSGCrypto) {
+            throw new Error('E2EE browser crypto bundle is unavailable');
+        }
+
+        this.e2ee = new window.DeceMSGCrypto();
+        await this.e2ee.initialize(
+            '@' + this.currentUser.username + ':' + this.currentUser.domain,
+            this.device.deviceId,
+            this.device.cryptoStorePassphrase
+        );
+        await this.e2ee.flushRequests(null, payload => this.sendCryptoRequest(payload));
+        this.e2eeReady = true;
+        this.startCryptoSync();
+    }
+
+    async sendCryptoRequest(payload) {
+        return this.apiCall('/crypto/requests', 'POST', payload);
+    }
+
+    startCryptoSync() {
+        if (this.cryptoSyncTimer) {
+            clearInterval(this.cryptoSyncTimer);
+        }
+        this.cryptoSyncTimer = setInterval(() => {
+            this.pollCryptoEvents().catch(error => {
+                console.error('E2EE sync failed:', error);
+            });
+        }, 1500);
+        this.pollCryptoEvents().catch(error => {
+            console.error('Initial E2EE sync failed:', error);
+        });
+    }
+
+    async pollCryptoEvents() {
+        if (!this.e2eeReady) return;
+        const result = await this.apiCall('/crypto/to-device');
+        if (!result.events?.length) return;
+
+        await this.e2ee.receiveToDeviceEvents(result.events, payload => this.sendCryptoRequest(payload));
+        await this.apiCall('/crypto/to-device/ack', 'POST', result.events.map(event => event.id));
+    }
+
+    roomIdForChat(chat) {
+        return '!' + chat.id + ':' + this.currentUser.domain;
+    }
+
+    async recipientMatrixUserId(chat) {
+        const other = chat.members.find(member => member.user_id !== this.currentUser.id);
+        if (!other?.user) {
+            throw new Error('E2EE currently requires a local direct-chat recipient');
+        }
+        return '@' + other.user.username + ':' + other.user.domain;
     }
 
     async handleRegister() {
@@ -571,6 +638,10 @@ class DeceMSGApp {
 
             this.token = data.access_token;
             localStorage.setItem('token', this.token);
+            this.device = await this.cryptoStore.ensureDevice(
+                publicIdentityKey => this.enrollBrowserDevice(publicIdentityKey)
+            );
+            await this.initializeE2EE();
             await this.loadCurrentUser();
             this.showMainScreen();
         } catch (error) {
@@ -595,6 +666,12 @@ class DeceMSGApp {
     async loadCurrentUser() {
         try {
             this.currentUser = await this.apiCall('/auth/me');
+            if (!this.device) {
+                this.device = await this.cryptoStore.getDevice();
+            }
+            if (!this.e2eeReady && this.device) {
+                await this.initializeE2EE();
+            }
             const sidebarName = document.getElementById('sidebar-user-name');
             if (sidebarName) {
                 sidebarName.textContent = this.currentUser.display_name;
@@ -730,12 +807,12 @@ class DeceMSGApp {
         }
     }
 
-    handleNewMessage(message, chatId) {
+    async handleNewMessage(message, chatId) {
         const isCurrentChat = this.currentChat && this.currentChat.id === chatId;
         
         if (isCurrentChat) {
             // Add message to current chat
-            this.appendMessage(message);
+            await this.appendMessage(message);
             this.scrollToBottom();
             
             // Send read receipt
@@ -942,16 +1019,16 @@ class DeceMSGApp {
         }
     }
 
-    renderMessages(messages) {
+    async renderMessages(messages) {
         const container = document.getElementById('messages-container');
         container.innerHTML = '';
 
-        messages.forEach(msg => {
-            this.appendMessage(msg);
-        });
+        for (const msg of messages) {
+            await this.appendMessage(msg);
+        }
     }
 
-    appendMessage(msg) {
+    async appendMessage(msg) {
         const container = document.getElementById('messages-container');
         const div = document.createElement('div');
         div.className = `message ${msg.sender_id === this.currentUser?.id ? 'sent' : 'received'}`;
@@ -974,7 +1051,34 @@ class DeceMSGApp {
                 </div>
             </a>`;
         } else {
-            contentHtml = this.escapeHtml(msg.content);
+            let displayContent = msg.content;
+            try {
+                const encryptedContent = JSON.parse(msg.content);
+                if (
+                    this.e2eeReady &&
+                    encryptedContent &&
+                    encryptedContent.algorithm &&
+                    encryptedContent.ciphertext
+                ) {
+                    const senderMatrixId = isCurrentUser
+                        ? '@' + this.currentUser.username + ':' + this.currentUser.domain
+                        : '@' + msg.sender.username + ':' + msg.sender.domain;
+                    const encryptedEvent = JSON.stringify({
+                        type: 'm.room.encrypted',
+                        sender: senderMatrixId,
+                        content: encryptedContent
+                    });
+                    const decrypted = await this.e2ee.decryptMessage(
+                        this.roomIdForChat(this.currentChat),
+                        encryptedEvent
+                    );
+                    displayContent = decrypted.body || decrypted.content?.body || '[Encrypted message]';
+                }
+            } catch (error) {
+                displayContent = '[Unable to decrypt message]';
+                console.error('E2EE message decryption failed:', error);
+            }
+            contentHtml = this.escapeHtml(displayContent);
         }
 
         // Build reactions
@@ -1075,21 +1179,26 @@ class DeceMSGApp {
         if (!this.currentChat) return;
 
         try {
-            let messageData = {
-                content: content || (this.selectedFile ? 'Sent a file' : 'Sent a message'),
-                message_type: 'text'
-            };
-
             if (this.selectedFile) {
-                const uploadData = await this.uploadFile(this.selectedFile);
-                messageData.message_type = uploadData.message_type;
-                messageData.file_url = uploadData.file_url;
-                messageData.file_name = uploadData.file_name;
-                messageData.file_size = uploadData.file_size;
-                messageData.content = content || `Sent a ${uploadData.message_type === 'image' ? 'image' : 'file'}`;
+                throw new Error('Encrypted file messages are not enabled yet');
+            }
+            if (!this.e2eeReady) {
+                throw new Error('E2EE is not ready');
             }
 
-            await this.apiCall(`/chats/${this.currentChat.id}/messages`, 'POST', messageData);
+            const recipient = await this.recipientMatrixUserId(this.currentChat);
+            const encryptedEvent = await this.e2ee.encryptText(
+                this.currentChat.id,
+                this.roomIdForChat(this.currentChat),
+                recipient,
+                content || 'Sent a message',
+                payload => this.sendCryptoRequest(payload)
+            );
+
+            await this.apiCall(`/chats/${this.currentChat.id}/messages`, 'POST', {
+                encrypted_content: encryptedEvent,
+                message_type: 'text'
+            });
 
             input.value = '';
             this.removeSelectedFile();
