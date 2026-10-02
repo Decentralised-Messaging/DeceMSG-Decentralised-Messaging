@@ -131,6 +131,14 @@ export class DeceMSGCrypto {
   async flushRequests(chatId, sendRequest) {
     const requests = await this.#machine.outgoingRequests();
     for (const request of requests) {
+      if (
+        !chatId &&
+        (request instanceof KeysQueryRequest ||
+          request instanceof KeysClaimRequest ||
+          request instanceof ToDeviceRequest)
+      ) {
+        continue;
+      }
       await this.#sendRequest(chatId, request, sendRequest);
     }
   }
