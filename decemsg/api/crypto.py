@@ -19,7 +19,7 @@ from decemsg.models.chat import ChatMember
 from decemsg.models.device import Device, DeviceStatus
 from decemsg.models.user import User
 from decemsg.models.session import UserSession
-from decemsg.models.crypto import CryptoDeviceState, CryptoToDeviceMessage
+from decemsg.models.crypto import CryptoDeviceState, CryptoToDeviceMessage, CryptoRoomState
 
 router = APIRouter(prefix="/api/crypto", tags=["E2EE"])
 
@@ -160,6 +160,55 @@ async def _keys_claim(body: dict[str, Any], db: AsyncSession) -> dict[str, Any]:
     await db.commit()
     return response
 
+
+
+async def get_or_create_crypto_room_state(chat_id: str, db: AsyncSession) -> CryptoRoomState:
+    result = await db.execute(
+        select(CryptoRoomState).where(CryptoRoomState.chat_id == chat_id)
+    )
+    state = result.scalar_one_or_none()
+    if state is None:
+        state = CryptoRoomState(chat_id=chat_id, epoch=0)
+        db.add(state)
+        await db.flush()
+    return state
+
+
+@router.get("/rooms/{chat_id}")
+async def get_crypto_room_state(
+    chat_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ChatMember).where(
+            ChatMember.chat_id == chat_id,
+            ChatMember.user_id == current_user.id,
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=403, detail="Crypto room is outside the user's chat membership")
+
+    state = await get_or_create_crypto_room_state(chat_id, db)
+    await db.commit()
+    return {
+        "chat_id": chat_id,
+        "epoch": state.epoch,
+    }
+
+
+async def rotate_crypto_rooms_for_user(user_id: str, db: AsyncSession) -> int:
+    result = await db.execute(
+        select(ChatMember.chat_id).where(ChatMember.user_id == user_id)
+    )
+    chat_ids = [row[0] for row in result.all()]
+    rotated = 0
+    for chat_id in chat_ids:
+        state = await get_or_create_crypto_room_state(chat_id, db)
+        state.epoch += 1
+        state.updated_at = datetime.utcnow()
+        rotated += 1
+    return rotated
 
 @router.post("/requests")
 async def process_crypto_request(
