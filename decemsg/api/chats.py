@@ -487,6 +487,14 @@ async def add_member(
         role=MemberRole.MEMBER
     )
     db.add(member)
+
+    # Membership changes rotate the application crypto room epoch so removed
+    # members cannot decrypt future group messages with an old room key.
+    from decemsg.api.crypto import get_or_create_crypto_room_state
+    crypto_room = await get_or_create_crypto_room_state(chat_id, db)
+    crypto_room.epoch += 1
+    crypto_room.updated_at = datetime.utcnow()
+
     await db.commit()
     
     return {"message": "Member added successfully"}
@@ -527,4 +535,10 @@ async def remove_member(
     membership = next((m for m in chat.members if m.user_id == user_id), None)
     if membership:
         await db.delete(membership)
+
+        from decemsg.api.crypto import get_or_create_crypto_room_state
+        crypto_room = await get_or_create_crypto_room_state(chat_id, db)
+        crypto_room.epoch += 1
+        crypto_room.updated_at = datetime.utcnow()
+
         await db.commit()
