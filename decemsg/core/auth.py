@@ -12,6 +12,7 @@ from sqlalchemy import select
 from decemsg.core.config import get_config
 from decemsg.core.database import get_db
 from decemsg.models.session import UserSession
+from decemsg.models.device import Device, DeviceStatus
 
 # OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -71,6 +72,27 @@ def decode_token(token: str) -> dict:
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+async def validate_login_device(
+    db: AsyncSession,
+    user_id: str,
+    device_id: str | None,
+) -> str | None:
+    """Validate an optional device binding presented during login."""
+    if not device_id:
+        return None
+
+    result = await db.execute(
+        select(Device).where(
+            Device.id == device_id,
+            Device.user_id == user_id,
+        )
+    )
+    device = result.scalar_one_or_none()
+    if device is None or device.status != DeviceStatus.ACTIVE or device.revoked_at is not None:
+        raise HTTPException(status_code=403, detail="Device is revoked or not registered")
+    return device.id
 
 
 async def get_current_session(
