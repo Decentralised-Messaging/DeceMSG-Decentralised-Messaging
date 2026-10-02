@@ -495,7 +495,9 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 - Server key discovery is scoped to chat membership, and to-device delivery is scoped to active devices.
 - Chat membership changes rotate the per-chat crypto epoch.
 - The E2EE smoke suite covers multiple authorized devices and exclusion of a removed device after rotation.
-- Remaining acceptance work: offline/retry behavior and replay/duplicate handling; the latter is intentionally aligned with TASK-019/TASK-020 rather than duplicated.
+- Added security regression coverage for offline to-device retry-until-ack behavior.
+- Replay/duplicate handling is now covered by the signed federation event/replay work in TASK-019/TASK-020.
+- Final completion remains gated on CI verification.
 
 ---
 
@@ -548,7 +550,7 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 ## TASK-021 — Replace File-Based Federation Queues with Durable Queues
 
 **Priority:** P2  
-**Status:** Planned  
+**Status:** In Progress  
 **Dependencies:** TASK-020
 
 ### Acceptance Criteria
@@ -560,6 +562,15 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 - [ ] Retries are bounded and observable.
 - [ ] Duplicate delivery remains idempotent.
 - [ ] Dead-letter handling exists for permanently failing events.
+
+### TASK-021 Current Work
+
+- Added durable SQL-backed federation delivery jobs with idempotency keys.
+- Added transactional outbox insertion so a local message and its federation delivery job commit together.
+- Added lease-based worker claiming, bounded retries with backoff, and dead-letter state after maximum attempts.
+- Federation delivery now runs in a restart-safe background worker using the persistent database queue.
+- Added regression tests for idempotent enqueue, retry/backoff, dead-letter transition, and lease expiry.
+- Final completion remains gated on CI verification.
 
 ---
 
