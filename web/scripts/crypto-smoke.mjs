@@ -53,10 +53,13 @@ await alice.markRequestAsSent(
   }),
 );
 
+const claimRequest = await alice.getMissingSessions([bobUser]);
+if (!claimRequest) throw new Error("Alice did not request a Bob session");
+
 const [bobOneTimeId, bobOneTimeKey] = bobOneTimeEntries[0];
 await alice.markRequestAsSent(
-  "alice-key-claim",
-  RequestType.KeysClaim,
+  claimRequest.id,
+  claimRequest.type,
   JSON.stringify({
     one_time_keys: {
       "@bob:example.com": {
