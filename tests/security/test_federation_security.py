@@ -7,6 +7,7 @@ future implementation that unexpectedly makes one of these tests pass will
 fail CI, forcing the contract annotation to be removed deliberately.
 """
 
+import asyncio
 import time
 from unittest.mock import AsyncMock
 
@@ -100,7 +101,6 @@ def _signed_headers(
 
 
 @pytest.mark.security
-@pytest.mark.asyncio
 @pytest.mark.parametrize("path,method", PROTECTED_ENDPOINTS)
 async def test_protected_federation_endpoints_require_authentication(
     path: str,
@@ -108,7 +108,7 @@ async def test_protected_federation_endpoints_require_authentication(
 ) -> None:
     """Protected federation operations reject requests without credentials."""
     middleware = FederationAuthMiddleware(AsyncMock())
-    response = await _dispatch(_request(path, method), middleware)
+    response = asyncio.run(_dispatch(_request(path, method), middleware))
 
     assert response.status_code == 401
 
