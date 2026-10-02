@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 from typing import List, Optional
+from datetime import datetime
 from functools import lru_cache
 
 import yaml
@@ -34,9 +35,22 @@ class MessagingConfig(BaseModel):
     allowed_file_types: List[str] = [".jpg", ".png", ".gif", ".pdf", ".doc", ".docx", ".txt"]
 
 
+class FederationTrustedKey(BaseModel):
+    """Explicitly trusted federation signing key for a domain."""
+
+    domain: str
+    key_id: str
+    public_key_pem: str
+    not_before: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    revoked: bool = False
+
+
 class FederationConfig(BaseModel):
     enabled: bool = True
     discovery_mode: str = "dns"
+    trust_model: str = "explicit_key_pinning"
+    trusted_keys: List[FederationTrustedKey] = []
 
 
 class RateLimitConfig(BaseModel):
