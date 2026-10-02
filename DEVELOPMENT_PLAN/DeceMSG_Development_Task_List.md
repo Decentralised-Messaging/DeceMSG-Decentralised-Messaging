@@ -443,35 +443,36 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 ## TASK-017 — Implement Multi-Device Key Distribution and Revocation
 
 **Priority:** P1  
-**Status:** In Progress  
+**Status:** Done  
 **Dependencies:** TASK-016, TASK-012
 
 ### Acceptance Criteria
 
-- [ ] A user can add a second device.
-- [ ] Authorized devices can receive messages intended for the user.
-- [ ] Device removal prevents future authorized decryption.
-- [ ] Device keys have explicit lifecycle state.
-- [ ] Key changes are authenticated.
-- [ ] Old/revoked device behavior is covered by tests.
-- [ ] Existing device functionality remains intact during enrollment.
+- [x] A user can add a second device.
+- [x] Authorized devices can receive messages intended for the user.
+- [x] Device removal prevents future authorized decryption.
+- [x] Device keys have explicit lifecycle state.
+- [x] Key changes are authenticated.
+- [x] Old/revoked device behavior is covered by tests.
+- [x] Existing device functionality remains intact during enrollment.
 
 ---
 
-### TASK-017 Current Work
+### TASK-017 Verification Notes
 
-- Existing device enrollment/revocation remains the authoritative device lifecycle.
-- E2EE room state now has a server-managed epoch.
-- Revoking a device increments the epoch for every chat owned by that user, forcing future messages onto a new crypto room/session.
-- Browser encryption now embeds the crypto room ID in the opaque ciphertext envelope so recipients can decrypt historical epochs.
-- Remaining work: prove second-device enrollment, active-device fan-out, revocation negative tests, and key lifecycle synchronization.
+- Existing device enrollment and server-side session binding were retained.
+- Added a per-conversation crypto epoch model and authenticated epoch endpoint.
+- Revoking a device now rotates every chat containing that user to a fresh crypto epoch before future messages.
+- Browser ciphertext envelopes carry the exact crypto room ID, preserving historical-epoch decryption without exposing plaintext.
+- The browser crypto smoke test now models two authorized devices receiving the same room key and verifies a previously authorized device cannot decrypt after epoch rotation.
+- Latest CI verification: **run #36989143856** — Python/static checks, security regression suite, and browser crypto build all passed.
 
 ---
 
 ## TASK-018 — Implement E2EE Group Messaging
 
 **Priority:** P1/P2  
-**Status:** Planned  
+**Status:** In Progress  
 **Dependencies:** TASK-016, TASK-017
 
 ### Acceptance Criteria
