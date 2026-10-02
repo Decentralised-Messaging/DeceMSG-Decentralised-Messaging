@@ -31,6 +31,7 @@ class AuthResult:
     server_domain: Optional[str] = None
     public_key: Optional[str] = None
     key_id: Optional[str] = None
+    request_id: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -72,10 +73,11 @@ class FederationAuthMiddleware(BaseHTTPMiddleware):
         timestamp = request.headers.get("X-Server-Timestamp")
         public_key = request.headers.get("X-Server-Public-Key")
         key_id = request.headers.get("X-Server-Key-ID")
+        request_id = request.headers.get("X-Server-Request-ID")
         server_domain = request.headers.get("X-Server-Domain")
         
         # Check for missing headers
-        if not all([signature, timestamp, public_key, key_id, server_domain]):
+        if not all([signature, timestamp, request_id, public_key, key_id, server_domain]):
             return JSONResponse(
                 status_code=401,
                 content={"error": "Missing authentication headers"}
@@ -99,6 +101,7 @@ class FederationAuthMiddleware(BaseHTTPMiddleware):
                 "X-Server-Timestamp": timestamp,
                 "X-Server-Public-Key": public_key,
                 "X-Server-Key-ID": key_id,
+                "X-Server-Request-ID": request_id,
                 "X-Server-Domain": server_domain
             }
         ):
