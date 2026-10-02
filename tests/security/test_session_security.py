@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime, timedelta
 import pytest
 
-from decemsg.core.auth import create_access_token, get_current_session
+from decemsg.core.auth import create_access_token, get_current_session, validate_login_device
 from decemsg.api.auth import PasswordChangeRequest, change_password
 from decemsg.models.session import UserSession
 
@@ -280,3 +280,26 @@ def test_message_has_explicit_remote_sender_reference() -> None:
     from decemsg.models.message import Message
 
     assert "sender_federated_identity_id" in Message.__table__.columns
+
+
+
+@pytest.mark.security
+def test_revoked_device_cannot_create_a_new_bound_session() -> None:
+    """Login cannot bind a new session to a revoked device."""
+    from decemsg.models.device import Device, DeviceStatus
+
+    device = Device(
+        id="device-1",
+        user_id="user-1",
+        name="Laptop",
+        platform="web",
+        public_identity_key="public-key-material",
+        status=DeviceStatus.REVOKED,
+        revoked_at=datetime.utcnow(),
+    )
+    db = _SessionDB([])
+    db.execute = AsyncMock(return_value=_Result(device))
+
+    with pytest.raises(Exception) as exc:
+        asyncio.run(validate_login_device(db, "user-1", "device-1"))
+    assert getattr(exc.value, "status_code", None) == 403
