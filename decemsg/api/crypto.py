@@ -218,12 +218,11 @@ async def process_crypto_request(
             raise HTTPException(status_code=400, detail="chat_id is required for key discovery")
         if request.request_type == "keys_query":
             target_users = set(request.body.get("device_keys", {}).keys())
-            return_value = await _keys_query(request.body, db)
-        else:
-            target_users = set(request.body.get("one_time_keys", {}).keys())
-            return_value = await _keys_claim(request.body, db)
+            await _require_chat_membership(request.chat_id, current_user.id, target_users, db)
+            return await _keys_query(request.body, db)
+        target_users = set(request.body.get("one_time_keys", {}).keys())
         await _require_chat_membership(request.chat_id, current_user.id, target_users, db)
-        return return_value
+        return await _keys_claim(request.body, db)
 
     if request.request_type == "to_device":
         if not request.chat_id or not request.event_type:
