@@ -1,4 +1,5 @@
 """DeceMSG database module."""
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from pathlib import Path
@@ -71,10 +72,32 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db():
-    """Initialize database tables."""
+    """Initialize database tables and backfill stable identities."""
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Existing users predate UserIdentity. Backfill their stable identity once.
+    from decemsg.models.user import User
+    from decemsg.models.identity import UserIdentity
+
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        result = await session.execute(select(User))
+        users = result.scalars().all()
+        for user in users:
+            identity_result = await session.execute(
+                select(UserIdentity).where(UserIdentity.user_id == user.id)
+            )
+            if identity_result.scalar_one_or_none() is None:
+                session.add(
+                    UserIdentity(
+                        user_id=user.id,
+                        username=user.username,
+                        domain=user.domain,
+                    )
+                )
+        await session.commit()
 
 
 async def close_db():
