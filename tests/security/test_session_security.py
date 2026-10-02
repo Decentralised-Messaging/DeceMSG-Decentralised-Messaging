@@ -346,3 +346,34 @@ def test_recovery_backup_requires_argon2id_and_opaque_ciphertext() -> None:
     stored = db.add.call_args.args[0]
     assert "private_key" not in stored.__dict__
     assert stored.ciphertext == backup.ciphertext
+
+
+
+@pytest.mark.security
+def test_browser_crypto_private_keys_are_not_stored_in_web_storage() -> None:
+    """Browser device private keys must live in IndexedDB as CryptoKey objects."""
+    from pathlib import Path
+
+    app_js = (
+        Path(__file__).resolve().parents[2] / "decemsg" / "ui" / "app.js"
+    ).read_text(encoding="utf-8")
+
+    assert "indexedDB.open" in app_js
+    assert "generateKey" in app_js
+    assert "false," in app_js
+    assert "localStorage.setItem('privateKey'" not in app_js
+    assert "localStorage.setItem('deviceKey'" not in app_js
+
+
+@pytest.mark.security
+def test_browser_csp_is_configured() -> None:
+    """The browser client has a restrictive same-origin CSP."""
+    from pathlib import Path
+
+    index_html = (
+        Path(__file__).resolve().parents[2] / "decemsg" / "ui" / "index.html"
+    ).read_text(encoding="utf-8")
+
+    assert "Content-Security-Policy" in index_html
+    assert "script-src 'self'" in index_html
+    assert "object-src 'none'" in index_html
