@@ -9,6 +9,7 @@ import dns.exception
 from urllib.parse import urlparse
 
 from decemsg.core.config import get_config
+from decemsg.federation.server_auth import create_authenticated_request
 
 
 # DNS SRV record service name for DeceMSG federation
@@ -250,7 +251,8 @@ class FederationClient:
         to_user: str,
         to_domain: str,
         content: str,
-        message_type: str = "text"
+        message_type: str = "text",
+        event: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """Send a message to a federated user."""
         server_info = await self.discover_server(to_domain)
@@ -260,16 +262,31 @@ class FederationClient:
         
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
+                import json
+                payload = {
+                    "from_user": from_user,
+                    "from_domain": from_domain,
+                    "to_user": to_user,
+                    "content": content,
+                    "message_type": message_type,
+                    "encrypted": True,
+                    "event": event,
+                }
+                body = json.dumps(
+                    payload,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
+                headers = create_authenticated_request(
+                    "POST",
+                    "/federation/messages",
+                    body,
+                )
+                headers["Content-Type"] = "application/json"
                 response = await client.post(
                     f"{server_info.api_url}/federation/messages",
-                    json={
-                        "from_user": from_user,
-                        "from_domain": from_domain,
-                        "to_user": to_user,
-                        "content": content,
-                        "message_type": message_type
-                    },
-                    headers={"Content-Type": "application/json"}
+                    content=body,
+                    headers=headers,
                 )
                 
                 return response.status_code in (200, 201, 202)
