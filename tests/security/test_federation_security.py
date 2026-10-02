@@ -16,6 +16,7 @@ from fastapi import Request
 from starlette.responses import Response
 
 from decemsg.federation.auth_middleware import FederationAuthMiddleware
+from decemsg.main import app
 from decemsg.federation.server_auth import (
     ServerKeyManager,
     verify_authenticated_request,
@@ -98,6 +99,35 @@ def _signed_headers(
         "X-Server-Public-Key": manager.get_public_key_pem(),
         "X-Server-Domain": domain,
     }
+
+
+@pytest.mark.security
+def test_federation_auth_middleware_is_registered() -> None:
+    """Application startup must register the federation auth middleware."""
+    assert any(
+        middleware.cls is FederationAuthMiddleware
+        for middleware in app.user_middleware
+    )
+
+
+@pytest.mark.security
+def test_unknown_federation_route_is_protected_by_default() -> None:
+    """New federation routes must not silently become public."""
+    middleware = FederationAuthMiddleware(AsyncMock())
+    response = asyncio.run(
+        _dispatch(_request("/federation/new-future-endpoint", "POST"), middleware)
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.security
+def test_explicit_discovery_route_remains_public() -> None:
+    """Protocol discovery metadata must remain reachable without federation auth."""
+    middleware = FederationAuthMiddleware(AsyncMock())
+    response = asyncio.run(
+        _dispatch(_request("/federation/.well-known/nodeinfo", "GET"), middleware)
+    )
+    assert response.status_code == 204
 
 
 @pytest.mark.security
