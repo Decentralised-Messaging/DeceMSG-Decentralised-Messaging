@@ -102,6 +102,10 @@ jobs:
         working-directory: web
         run: npm run verify-crypto-package
 
+      - name: Run Alice-to-Bob E2EE smoke test
+        working-directory: web
+        run: npm run crypto-smoke
+
       - name: Build browser crypto staging tree
         working-directory: web
         run: npm run build
