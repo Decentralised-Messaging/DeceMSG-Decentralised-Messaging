@@ -327,3 +327,28 @@ async def get_to_device_events(
             for event in events
         ]
     }
+@router.post("/to-device/ack")
+async def acknowledge_to_device_events(
+    event_ids: list[str],
+    current_user: User = Depends(get_current_user),
+    current_session: UserSession = Depends(get_current_session),
+    db: AsyncSession = Depends(get_db),
+):
+    device = await _require_current_device(current_user, current_session, db)
+    if not event_ids:
+        return {"acknowledged": 0}
+
+    result = await db.execute(
+        select(CryptoToDeviceMessage).where(
+            CryptoToDeviceMessage.id.in_(event_ids),
+            CryptoToDeviceMessage.recipient_user_id == current_user.id,
+            CryptoToDeviceMessage.recipient_device_id == device.id,
+            CryptoToDeviceMessage.delivered_at.is_(None),
+        )
+    )
+    events = result.scalars().all()
+    now = datetime.utcnow()
+    for event in events:
+        event.delivered_at = now
+    await db.commit()
+    return {"acknowledged": len(events)}
