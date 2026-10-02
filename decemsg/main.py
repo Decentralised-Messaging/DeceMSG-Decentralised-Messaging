@@ -1,6 +1,7 @@
 """DeceMSG main application entry point."""
 import os
 import sys
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from decemsg.api import (
 )
 from decemsg.federation import router as federation_router
 from decemsg.federation.auth_middleware import FederationAuthMiddleware
+from decemsg.federation.delivery_queue import federation_delivery_worker
 
 
 # Prefer the reproducible browser build when present; source UI remains a dev fallback.
@@ -39,6 +41,8 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     # Startup
     await init_db()
+    delivery_stop = asyncio.Event()
+    delivery_task = asyncio.create_task(federation_delivery_worker(delivery_stop))
     
     # Create data directories
     data_dir = Path("./data")
@@ -49,6 +53,12 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
+    delivery_stop.set()
+    delivery_task.cancel()
+    try:
+        await delivery_task
+    except asyncio.CancelledError:
+        pass
     await close_db()
 
 
