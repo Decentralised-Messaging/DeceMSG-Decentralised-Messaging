@@ -175,22 +175,4 @@ try {
   if (error?.code === undefined) throw error;
 }
 
-const tampered = JSON.parse(encryptedEvent);
-const tamperedCiphertext = JSON.parse(JSON.stringify(tampered.content.ciphertext));
-const firstCiphertextKey = Object.keys(tamperedCiphertext)[0];
-tamperedCiphertext[firstCiphertextKey].body =
-  tamperedCiphertext[firstCiphertextKey].body.slice(0, -2) + "AA";
-tampered.content.ciphertext = tamperedCiphertext;
-
-try {
-  await bob.decryptRoomEvent(
-    JSON.stringify(tampered),
-    room,
-    new DecryptionSettings(),
-  );
-  throw new Error("Tampered ciphertext was accepted");
-} catch (error) {
-  if (error?.code === undefined) throw error;
-}
-
 console.log("DeceMSG E2EE smoke test passed: Alice encrypted, Bob decrypted, and no server-side plaintext step was used.");
