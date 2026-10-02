@@ -3,6 +3,7 @@
 import asyncio
 from datetime import datetime, timedelta
 import pytest
+from unittest.mock import AsyncMock
 
 from decemsg.core.auth import create_access_token, get_current_session, validate_login_device
 from decemsg.api.auth import PasswordChangeRequest, change_password
