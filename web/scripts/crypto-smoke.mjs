@@ -114,8 +114,9 @@ for (const request of keyShareRequests) {
     throw new Error("Unexpected room-key request type");
   }
   const body = JSON.parse(request.body);
-  const content = body.messages["@bob:example.com"]["BOB_DEVICE"];
-  if (!content) throw new Error("Room-key share did not target Bob");
+  const rawContent = body.messages["@bob:example.com"]["BOB_DEVICE"];
+  if (!rawContent) throw new Error("Room-key share did not target Bob");
+  const content = typeof rawContent === "string" ? JSON.parse(rawContent) : rawContent;
 
   const toDeviceEvent = {
     sender: "@alice:example.com",
