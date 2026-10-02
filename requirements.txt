@@ -1,6 +1,6 @@
 # Core
 fastapi==0.115.6
-uvicorn[standard]==0.24.0
+uvicorn[standard]==0.31.1
 python-multipart==0.0.20
 websockets==12.0
 
