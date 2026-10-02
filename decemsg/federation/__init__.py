@@ -698,21 +698,29 @@ async def sync_chat_from_federation(
         raise HTTPException(status_code=403, detail="Federation cannot create or replace local chat state")
 
     existing_result = await db.execute(
-        select(ChatMember).where(ChatMember.chat_id == sync_data.chat_id)
+        select(ChatMember)
+        .options(selectinload(ChatMember.federated_identity))
+        .where(ChatMember.chat_id == sync_data.chat_id)
     )
-    existing_ids = {member.user_id for member in existing_result.scalars().all()}
+    existing_members = existing_result.scalars().all()
+    existing_local_ids = {member.user_id for member in existing_members if member.user_id}
+    existing_remote_ids = {
+        member.federated_identity_id for member in existing_members
+        if member.federated_identity_id
+    }
 
     for member_id in sync_data.members:
         if "#" in member_id:
             if not _origin_actor(member_id, federation_auth.server_domain):
                 raise HTTPException(status_code=403, detail="Remote member belongs to another domain")
-            if member_id not in existing_ids:
+            identity = await _get_or_create_federated_identity(db, member_id)
+            if identity.id not in existing_remote_ids:
                 db.add(ChatMember(
                     chat_id=sync_data.chat_id,
-                    user_id=member_id,
+                    federated_identity_id=identity.id,
                     role="member",
                 ))
-        elif member_id not in existing_ids:
+        elif member_id not in existing_local_ids:
             raise HTTPException(status_code=403, detail="Remote server cannot add local users")
 
     await db.commit()
@@ -735,21 +743,29 @@ async def sync_group_chat(
         raise HTTPException(status_code=403, detail="Federation cannot create or replace local group state")
 
     existing_result = await db.execute(
-        select(ChatMember).where(ChatMember.chat_id == group_data.chat_id)
+        select(ChatMember)
+        .options(selectinload(ChatMember.federated_identity))
+        .where(ChatMember.chat_id == group_data.chat_id)
     )
-    existing_ids = {member.user_id for member in existing_result.scalars().all()}
+    existing_members = existing_result.scalars().all()
+    existing_local_ids = {member.user_id for member in existing_members if member.user_id}
+    existing_remote_ids = {
+        member.federated_identity_id for member in existing_members
+        if member.federated_identity_id
+    }
 
     for member_id in group_data.members:
         if "#" in member_id:
             if not _origin_actor(member_id, federation_auth.server_domain):
                 raise HTTPException(status_code=403, detail="Remote member belongs to another domain")
-            if member_id not in existing_ids:
+            identity = await _get_or_create_federated_identity(db, member_id)
+            if identity.id not in existing_remote_ids:
                 db.add(ChatMember(
                     chat_id=group_data.chat_id,
-                    user_id=member_id,
+                    federated_identity_id=identity.id,
                     role="admin" if member_id == group_data.created_by else "member",
                 ))
-        elif member_id not in existing_ids:
+        elif member_id not in existing_local_ids:
             raise HTTPException(status_code=403, detail="Remote server cannot add local members")
 
     await db.commit()
