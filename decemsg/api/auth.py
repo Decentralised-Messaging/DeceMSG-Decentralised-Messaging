@@ -7,6 +7,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -23,6 +24,7 @@ from decemsg.core.rate_limiter import limiter, get_login_rate_limit
 from decemsg.models.user import User
 from decemsg.models.session import UserSession
 from decemsg.models.identity import UserIdentity
+from decemsg.models.device import Device, DeviceStatus
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
@@ -110,8 +112,23 @@ async def login(
     # Create a revocable server-side session and bind the JWT to it.
     access_token_expires = timedelta(hours=config.auth.jwt_expiry_hours)
     expires_at = datetime.utcnow() + access_token_expires
+    requested_device_id = request.headers.get("X-Device-ID")
+    device_id = None
+    if requested_device_id:
+        device_result = await db.execute(
+            select(Device).where(
+                Device.id == requested_device_id,
+                Device.user_id == user.id,
+            )
+        )
+        device = device_result.scalar_one_or_none()
+        if device is None or device.status != DeviceStatus.ACTIVE or device.revoked_at is not None:
+            raise HTTPException(status_code=403, detail="Device is revoked or not registered")
+        device_id = device.id
+
     session = UserSession(
         user_id=user.id,
+        device_id=device_id,
         expires_at=expires_at,
         user_agent=request.headers.get("user-agent"),
         ip_address=request.client.host if request.client else None,
@@ -252,6 +269,126 @@ async def logout(
     current_session.revoked_at = datetime.utcnow()
     await db.commit()
     return {"message": "Successfully logged out"}
+
+
+class DeviceCreateRequest(BaseModel):
+    """Enroll a new device cryptographic identity."""
+    name: str = Field(..., min_length=1, max_length=100)
+    platform: str = Field(..., min_length=1, max_length=50)
+    public_identity_key: str = Field(..., min_length=32, max_length=4096)
+
+
+class DeviceResponse(BaseModel):
+    id: str
+    name: str
+    platform: str
+    public_identity_key: str
+    status: str
+    created_at: str
+    last_seen_at: str
+    revoked_at: str | None
+
+
+@router.post("/devices", response_model=DeviceResponse, status_code=status.HTTP_201_CREATED)
+async def enroll_device(
+    device_data: DeviceCreateRequest,
+    current_user: User = Depends(get_current_user),
+    current_session: UserSession = Depends(get_current_session),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enroll a device and bind the current session to it."""
+    if current_session.user_id != current_user.id:
+        raise HTTPException(status_code=401, detail="Invalid session")
+
+    device = Device(
+        user_id=current_user.id,
+        name=device_data.name,
+        platform=device_data.platform,
+        public_identity_key=device_data.public_identity_key,
+    )
+    db.add(device)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A device with this identity key is already registered",
+        )
+
+    current_session.device_id = device.id
+    await db.commit()
+    await db.refresh(device)
+
+    return DeviceResponse(
+        id=device.id,
+        name=device.name,
+        platform=device.platform,
+        public_identity_key=device.public_identity_key,
+        status=device.status.value,
+        created_at=device.created_at.isoformat(),
+        last_seen_at=device.last_seen_at.isoformat(),
+        revoked_at=device.revoked_at.isoformat() if device.revoked_at else None,
+    )
+
+
+@router.get("/devices", response_model=list[DeviceResponse])
+async def list_devices(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all enrolled devices without private key material."""
+    result = await db.execute(
+        select(Device)
+        .where(Device.user_id == current_user.id)
+        .order_by(Device.created_at.desc())
+    )
+    devices = result.scalars().all()
+    return [
+        DeviceResponse(
+            id=device.id,
+            name=device.name,
+            platform=device.platform,
+            public_identity_key=device.public_identity_key,
+            status=device.status.value,
+            created_at=device.created_at.isoformat(),
+            last_seen_at=device.last_seen_at.isoformat(),
+            revoked_at=device.revoked_at.isoformat() if device.revoked_at else None,
+        )
+        for device in devices
+    ]
+
+
+@router.delete("/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_device(
+    device_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke one device and all sessions bound to it."""
+    result = await db.execute(
+        select(Device).where(
+            Device.id == device_id,
+            Device.user_id == current_user.id,
+        )
+    )
+    device = result.scalar_one_or_none()
+    if device is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    device.status = DeviceStatus.REVOKED
+    device.revoked_at = datetime.utcnow()
+
+    session_result = await db.execute(
+        select(UserSession).where(
+            UserSession.device_id == device.id,
+            UserSession.revoked_at.is_(None),
+        )
+    )
+    for session in session_result.scalars().all():
+        session.revoked_at = datetime.utcnow()
+
+    await db.commit()
 
 
 @router.get("/sessions")
