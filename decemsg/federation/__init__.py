@@ -1,6 +1,6 @@
 """Federation API endpoints for DeceMSG."""
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Depends, status, Header
 from pydantic import BaseModel
@@ -14,8 +14,10 @@ from decemsg.federation.events import FederationEventEnvelope, verify_event_sign
 from decemsg.models.user import User
 from decemsg.models.message import Message
 from decemsg.models.chat import Chat, ChatMember
+from decemsg.models.federated_event import FederatedEventState
 from decemsg.models.federated_identity import FederatedIdentity
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 router = APIRouter(prefix="/federation", tags=["Federation"])
@@ -365,6 +367,52 @@ async def receive_message(
         or not verify_event_signature(event, federation_auth.public_key)
     ):
         raise HTTPException(status_code=401, detail="Invalid signed federation event")
+
+    # Enforce event freshness independently of the HTTP request timestamp.
+    created_at_text = event.get("created_at", "")
+    try:
+        created_at = datetime.fromisoformat(created_at_text.replace("Z", "+00:00"))
+        if created_at.tzinfo is not None:
+            created_at = created_at.astimezone(timezone.utc).replace(tzinfo=None)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid event timestamp")
+
+    now = datetime.utcnow()
+    if abs((now - created_at).total_seconds()) > 300:
+        raise HTTPException(status_code=400, detail="Stale federation event")
+
+    # Event IDs are durable idempotency keys. Insert before creating any message effect.
+    existing = await db.execute(
+        select(FederatedEventState).where(FederatedEventState.event_id == event["event_id"])
+    )
+    if existing.scalar_one_or_none() is not None:
+        return {"status": "duplicate", "event_id": event["event_id"]}
+
+    if event["sequence"] > 0:
+        latest = await db.execute(
+            select(FederatedEventState).where(
+                FederatedEventState.origin_server == message.from_domain,
+                FederatedEventState.actor_identity == event["actor_identity"],
+                FederatedEventState.conversation_id == event["conversation_id"],
+            ).order_by(FederatedEventState.sequence.desc()).limit(1)
+        )
+        latest_state = latest.scalar_one_or_none()
+        if latest_state is not None and event["sequence"] < latest_state.sequence:
+            raise HTTPException(status_code=409, detail="Federation event sequence regression")
+
+    db.add(FederatedEventState(
+        event_id=event["event_id"],
+        origin_server=event["origin_server"],
+        actor_identity=event["actor_identity"],
+        conversation_id=event["conversation_id"],
+        sequence=event["sequence"],
+        accepted_at=now,
+    ))
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        return {"status": "duplicate", "event_id": event["event_id"]}
 
     message.content = event["ciphertext"]
     message.message_type = event.get("message_type", message.message_type)
