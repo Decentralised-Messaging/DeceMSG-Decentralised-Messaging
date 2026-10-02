@@ -120,7 +120,7 @@ for (const request of keyShareRequests) {
 
   const toDeviceEvent = {
     sender: "@alice:example.com",
-    type: String(request.eventType),
+    type: String(request.event_type),
     content,
   };
   console.log("to-device event:", JSON.stringify(toDeviceEvent));
