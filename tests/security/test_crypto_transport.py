@@ -4,6 +4,7 @@ import pytest
 
 from decemsg.api.crypto import CryptoRequest, _matrix_user_id
 from decemsg.api import crypto_router
+from decemsg.main import create_app
 from decemsg.models.crypto import CryptoDeviceState, CryptoToDeviceMessage
 from decemsg.api.messages import MessageCreate
 
@@ -26,6 +27,10 @@ def test_crypto_routes_are_registered() -> None:
     assert "/api/crypto/requests" in paths
     assert "/api/crypto/to-device" in paths
     assert "/api/crypto/to-device/ack" in paths
+
+    import inspect
+
+    assert "app.include_router(crypto_router)" in inspect.getsource(create_app)
 
 @pytest.mark.security
 def test_crypto_state_models_contain_no_private_key_fields() -> None:
