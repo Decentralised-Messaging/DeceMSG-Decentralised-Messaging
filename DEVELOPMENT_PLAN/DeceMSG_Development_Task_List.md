@@ -101,7 +101,7 @@ Create reusable tests for authentication, authorization, federation, replay, ses
 ## TASK-003 — Install and Enforce Federation Authentication Middleware
 
 **Priority:** P0  
-**Status:** Planned  
+**Status:** Done  
 **Dependencies:** TASK-002
 
 ### Scope
@@ -123,7 +123,7 @@ Ensure every protected federation endpoint passes through the intended authentic
 ## TASK-004 — Define Server Identity and Domain-Key Trust Model
 
 **Priority:** P0  
-**Status:** Planned  
+**Status:** Done  
 **Dependencies:** TASK-003
 
 ### Scope
@@ -146,7 +146,7 @@ Separate discovery from trust and establish how a DeceMSG domain is authorized t
 ## TASK-005 — Harden Federation Request Authentication
 
 **Priority:** P0  
-**Status:** Planned  
+**Status:** Done  
 **Dependencies:** TASK-004
 
 ### Scope
@@ -169,7 +169,7 @@ Make federation authentication cryptographically verifiable and resistant to imp
 ## TASK-006 — Enforce Federation Authorization Boundaries
 
 **Priority:** P0  
-**Status:** Planned  
+**Status:** Done  
 **Dependencies:** TASK-005
 
 ### Scope
@@ -195,7 +195,7 @@ Authorize federation operations based on authenticated server, actor, conversati
 ## TASK-007 — Introduce Server-Side Session Model and Revocation
 
 **Priority:** P0  
-**Status:** Planned  
+**Status:** Done  
 **Dependencies:** TASK-002
 
 ### Scope
@@ -218,7 +218,7 @@ Replace purely stateless token lifecycle assumptions with explicit sessions that
 ## TASK-008 — Harden WebSocket Authentication
 
 **Priority:** P0  
-**Status:** Planned  
+**Status:** Done  
 **Dependencies:** TASK-007
 
 ### Scope
@@ -240,7 +240,7 @@ Remove insecure JWT query-parameter handling and enforce session lifecycle on lo
 ## TASK-009 — Harden Password Change and Account Credential Operations
 
 **Priority:** P0  
-**Status:** Planned  
+**Status:** Done  
 **Dependencies:** TASK-007
 
 ### Scope
@@ -264,7 +264,7 @@ Protect password changes from stolen-session abuse while preserving device ident
 ## TASK-010 — Implement Explicit UserIdentity and Device Models
 
 **Priority:** P1  
-**Status:** Planned  
+**Status:** Done  
 **Dependencies:** TASK-009
 
 ### Scope
@@ -287,7 +287,7 @@ Separate account identity from device identity.
 ## TASK-011 — Implement FederatedIdentity / RemoteUser Model
 
 **Priority:** P1  
-**Status:** Planned  
+**Status:** Done  
 **Dependencies:** TASK-010
 
 ### Scope
@@ -309,7 +309,7 @@ Stop representing remote identities as local-user foreign keys.
 ## TASK-012 — Implement Device Management API and UI Contract
 
 **Priority:** P1  
-**Status:** Planned  
+**Status:** Done  
 **Dependencies:** TASK-010
 
 ### Acceptance Criteria
@@ -329,7 +329,7 @@ Stop representing remote identities as local-user foreign keys.
 ## TASK-013 — Design Encrypted Identity Backup and Recovery
 
 **Priority:** P1  
-**Status:** Planned  
+**Status:** Done  
 **Dependencies:** TASK-010, TASK-012
 
 ### Scope
@@ -353,7 +353,7 @@ Implement password-assisted recovery without storing plaintext private keys serv
 ## TASK-014 — Make Web Client a First-Class Crypto Client
 
 **Priority:** P1  
-**Status:** Planned  
+**Status:** Done  
 **Dependencies:** TASK-013
 
 ### Acceptance Criteria
@@ -374,7 +374,7 @@ Implement password-assisted recovery without storing plaintext private keys serv
 ## TASK-015 — Select and Document Production Messaging Cryptography
 
 **Priority:** P1  
-**Status:** Planned  
+**Status:** Done  
 **Dependencies:** TASK-010
 
 ### Scope
@@ -393,10 +393,16 @@ Select a mature, reviewed messaging cryptographic protocol rather than inventing
 
 ---
 
+### TASK-015 Verification Notes
+
+- Selected the Signal Protocol family and documented the required security properties and lifecycle mapping.
+- Latest CI verification: **run #100** — test/static checks and security regression suite both passed.
+- Exact browser binding, build pipeline, and license compatibility are intentionally a release gate before integrating a concrete libsignal package.
+
 ## TASK-016 — Implement 1:1 E2EE Message Lifecycle
 
 **Priority:** P1  
-**Status:** Planned  
+**Status:** Blocked  
 **Dependencies:** TASK-015, TASK-011
 
 ### Acceptance Criteria
@@ -411,6 +417,10 @@ Select a mature, reviewed messaging cryptographic protocol rather than inventing
 - [ ] End-to-end tests verify Alice-to-Bob ciphertext flow.
 
 ---
+
+### TASK-016 Blocker
+
+The maintained browser-capable Signal implementation needs to be integrated through a reproducible frontend build/bundling pipeline and its AGPL licensing must be reviewed for compatibility with the project's distribution model. The repository currently has a static vanilla-JS client and no frontend package/build pipeline. Implementing a custom Web Crypto replacement would violate TASK-015's prohibition on custom messaging cryptography.
 
 ## TASK-017 — Implement Multi-Device Key Distribution and Revocation
 
