@@ -125,7 +125,7 @@ export class DeceMSGCrypto {
       roomId,
       new DecryptionSettings(),
     );
-    return JSON.parse(decrypted.clearEvent);
+    return JSON.parse(decrypted.event);
   }
 
   async flushRequests(chatId, sendRequest) {
