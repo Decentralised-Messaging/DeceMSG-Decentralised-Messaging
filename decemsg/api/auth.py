@@ -1,5 +1,7 @@
 """DeceMSG authentication API endpoints."""
 from datetime import datetime, timedelta
+import base64
+import binascii
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
@@ -26,6 +28,7 @@ from decemsg.models.user import User
 from decemsg.models.session import UserSession
 from decemsg.models.identity import UserIdentity
 from decemsg.models.device import Device, DeviceStatus
+from decemsg.models.recovery import IdentityRecoveryBackup
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
@@ -383,6 +386,98 @@ async def revoke_device(
         session.revoked_at = datetime.utcnow()
 
     await db.commit()
+
+
+class RecoveryBackupRequest(BaseModel):
+    """Opaque client-encrypted identity backup envelope."""
+    version: int = Field(..., ge=1)
+    kdf_algorithm: str = Field(..., min_length=1, max_length=32)
+    kdf_memory_kib: int = Field(..., ge=19456, le=1024 * 1024)
+    kdf_iterations: int = Field(..., ge=2, le=20)
+    kdf_parallelism: int = Field(..., ge=1, le=8)
+    kdf_salt: str = Field(..., min_length=22, max_length=256)
+    encryption_algorithm: str = Field(..., min_length=1, max_length=64)
+    encryption_nonce: str = Field(..., min_length=16, max_length=256)
+    ciphertext: str = Field(..., min_length=32, max_length=1_000_000)
+
+
+def _validate_recovery_b64(value: str, field_name: str, min_bytes: int) -> None:
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (ValueError, binascii.Error):
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name}")
+    if len(decoded) < min_bytes:
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name}")
+
+
+@router.put("/recovery/backup")
+async def put_recovery_backup(
+    backup_data: RecoveryBackupRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Store or replace an opaque client-encrypted identity backup."""
+    if backup_data.kdf_algorithm.lower() != "argon2id":
+        raise HTTPException(status_code=400, detail="Recovery backup must use Argon2id")
+    if backup_data.encryption_algorithm.upper() not in {"AES-256-GCM", "XCHACHA20-POLY1305"}:
+        raise HTTPException(status_code=400, detail="Unsupported recovery encryption algorithm")
+
+    _validate_recovery_b64(backup_data.kdf_salt, "KDF salt", 16)
+    _validate_recovery_b64(backup_data.encryption_nonce, "encryption nonce", 12)
+    _validate_recovery_b64(backup_data.ciphertext, "ciphertext", 32)
+
+    result = await db.execute(
+        select(IdentityRecoveryBackup).where(
+            IdentityRecoveryBackup.user_id == current_user.id
+        )
+    )
+    backup = result.scalar_one_or_none()
+    if backup is None:
+        backup = IdentityRecoveryBackup(user_id=current_user.id)
+        db.add(backup)
+
+    backup.version = backup_data.version
+    backup.kdf_algorithm = backup_data.kdf_algorithm.lower()
+    backup.kdf_memory_kib = backup_data.kdf_memory_kib
+    backup.kdf_iterations = backup_data.kdf_iterations
+    backup.kdf_parallelism = backup_data.kdf_parallelism
+    backup.kdf_salt = backup_data.kdf_salt
+    backup.encryption_algorithm = backup_data.encryption_algorithm.upper()
+    backup.encryption_nonce = backup_data.encryption_nonce
+    backup.ciphertext = backup_data.ciphertext
+    backup.updated_at = datetime.utcnow()
+
+    await db.commit()
+    return {"status": "stored", "version": backup.version}
+
+
+@router.get("/recovery/backup")
+async def get_recovery_backup(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retrieve only the opaque encrypted recovery backup."""
+    result = await db.execute(
+        select(IdentityRecoveryBackup).where(
+            IdentityRecoveryBackup.user_id == current_user.id
+        )
+    )
+    backup = result.scalar_one_or_none()
+    if backup is None:
+        raise HTTPException(status_code=404, detail="Recovery backup not found")
+
+    return {
+        "version": backup.version,
+        "kdf_algorithm": backup.kdf_algorithm,
+        "kdf_memory_kib": backup.kdf_memory_kib,
+        "kdf_iterations": backup.kdf_iterations,
+        "kdf_parallelism": backup.kdf_parallelism,
+        "kdf_salt": backup.kdf_salt,
+        "encryption_algorithm": backup.encryption_algorithm,
+        "encryption_nonce": backup.encryption_nonce,
+        "ciphertext": backup.ciphertext,
+        "updated_at": backup.updated_at.isoformat(),
+    }
 
 
 @router.get("/sessions")
