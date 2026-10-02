@@ -447,8 +447,9 @@ async def _notify_recipient(manager, user_id: str, chat_id: str, message):
                 )
             )
             remote = result.scalar_one_or_none()
+            sender_reference = remote.full_address if remote else message.sender_federated_identity_id
             sender_info = {
-                "id": remote.id if remote else message.sender_federated_identity_id,
+                "id": sender_reference,
                 "username": remote.username if remote else "unknown",
                 "display_name": remote.display_name if remote else "Unknown",
                 "avatar_url": remote.avatar_url if remote else None,
@@ -479,7 +480,7 @@ async def _notify_recipient(manager, user_id: str, chat_id: str, message):
         "message": {
             "id": str(message.id),
             "chat_id": chat_id,
-            "sender_id": message.sender_id,
+            "sender_id": sender_reference if message.sender_federated_identity_id else message.sender_id,
             "content": message.content,
             "message_type": message.message_type,
             "created_at": message.created_at.isoformat() if hasattr(message, 'created_at') else str(message.created_at),
