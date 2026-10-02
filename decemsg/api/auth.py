@@ -385,6 +385,11 @@ async def revoke_device(
     for session in session_result.scalars().all():
         session.revoked_at = datetime.utcnow()
 
+    # Force a fresh Megolm room epoch for future messages so the revoked
+    # device's previously received room key cannot decrypt new ciphertext.
+    from decemsg.api.crypto import rotate_crypto_rooms_for_user
+    await rotate_crypto_rooms_for_user(current_user.id, db)
+
     await db.commit()
 
 
