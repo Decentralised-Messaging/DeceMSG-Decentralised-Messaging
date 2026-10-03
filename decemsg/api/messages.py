@@ -1,6 +1,7 @@
 """DeceMSG messages API endpoints."""
 from typing import List, Optional
 from datetime import datetime
+import asyncio
 import base64
 import json
 
@@ -91,7 +92,7 @@ async def get_messages(
     limit: int = Query(50, ge=1, le=100),
     before: Optional[str] = Query(None, description="Opaque cursor for the page before this position"),
     after: Optional[str] = Query(None, description="Opaque cursor for the page after this position"),
-    response: Response = None,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
