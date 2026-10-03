@@ -477,13 +477,13 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 
 ### Acceptance Criteria
 
-- [ ] Group membership changes are authenticated.
-- [ ] Only authorized group devices receive decryptable content.
-- [ ] Removed devices cannot decrypt future messages.
-- [ ] New devices receive appropriate group key state.
-- [ ] Group key rotation behavior is documented and tested.
-- [ ] Offline group delivery works.
-- [ ] Replay and duplicate handling is tested.
+- [x] Group membership changes are authenticated.
+- [x] Only authorized group devices receive decryptable content.
+- [x] Removed devices cannot decrypt future messages.
+- [x] New devices receive appropriate group key state.
+- [x] Group key rotation behavior is documented and tested.
+- [x] Offline group delivery works.
+- [x] Replay and duplicate handling is tested.
 
 ---
 
@@ -509,13 +509,13 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 
 ### Acceptance Criteria
 
-- [ ] Event schema contains event ID, type, protocol version, origin, key ID, actor, target, conversation, timestamp, sequence, payload/ciphertext, and signature as appropriate.
-- [ ] Canonical serialization is defined.
-- [ ] Signature input is deterministic.
-- [ ] Event IDs are unique.
-- [ ] Protocol versioning is explicit.
-- [ ] Schema validation rejects malformed events.
-- [ ] Compatibility/versioning rules are documented.
+- [x] Event schema contains event ID, type, protocol version, origin, key ID, actor, target, conversation, timestamp, sequence, payload/ciphertext, and signature as appropriate.
+- [x] Canonical serialization is defined.
+- [x] Signature input is deterministic.
+- [x] Event IDs are unique.
+- [x] Protocol versioning is explicit.
+- [x] Schema validation rejects malformed events.
+- [x] Compatibility/versioning rules are documented.
 
 ---
 
@@ -537,15 +537,24 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 
 ### Acceptance Criteria
 
-- [ ] Duplicate event IDs are detected.
-- [ ] Replaying an accepted event does not create duplicate effects.
-- [ ] Expired/stale events are rejected according to policy.
-- [ ] Sequence/order violations are detected where ordering is required.
-- [ ] Replay state survives process restart.
-- [ ] Concurrent duplicate delivery is safe.
-- [ ] Automated replay attack tests pass.
+- [x] Duplicate event IDs are detected.
+- [x] Replaying an accepted event does not create duplicate effects.
+- [x] Expired/stale events are rejected according to policy.
+- [x] Sequence/order violations are detected where ordering is required.
+- [x] Replay state survives process restart.
+- [x] Concurrent duplicate delivery is safe.
+- [x] Automated replay attack tests pass.
 
 ---
+
+### TASK-020 Completion Notes
+
+- Durable `FederatedEventState` records event IDs and origin/actor/conversation sequence state in SQL.
+- Signed event freshness is enforced with a five-minute event timestamp window.
+- Duplicate event IDs return an idempotent duplicate response without creating another message effect.
+- Positive sequence regressions are rejected.
+- Concurrent duplicate inserts are protected by the unique event ID constraint and integrity-error handling.
+- Replay regression tests cover duplicate, stale, and sequence-regression events.
 
 ## TASK-021 — Replace File-Based Federation Queues with Durable Queues
 
@@ -555,13 +564,13 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 
 ### Acceptance Criteria
 
-- [ ] Federation delivery survives process restart.
-- [ ] Queue state is transactional.
-- [ ] Multiple workers can safely consume work.
-- [ ] Leases/visibility timeouts prevent stuck jobs.
-- [ ] Retries are bounded and observable.
-- [ ] Duplicate delivery remains idempotent.
-- [ ] Dead-letter handling exists for permanently failing events.
+- [x] Federation delivery survives process restart.
+- [x] Queue state is transactional.
+- [x] Multiple workers can safely consume work.
+- [x] Leases/visibility timeouts prevent stuck jobs.
+- [x] Retries are bounded and observable.
+- [x] Duplicate delivery remains idempotent.
+- [x] Dead-letter handling exists for permanently failing events.
 
 ### TASK-021 Completion Notes
 
