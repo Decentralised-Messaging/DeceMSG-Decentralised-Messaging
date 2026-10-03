@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta
 
 import pytest
+from fastapi import HTTPException
 
 from decemsg.api.messages import decode_message_cursor, encode_message_cursor
 
@@ -36,5 +37,5 @@ def test_message_cursor_supports_stable_forward_and_backward_ordering() -> None:
 
 
 def test_message_cursor_rejects_malformed_value() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(HTTPException):
         decode_message_cursor("not-a-valid-cursor")
