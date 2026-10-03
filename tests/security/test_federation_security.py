@@ -9,6 +9,7 @@ fail CI, forcing the contract annotation to be removed deliberately.
 
 import asyncio
 import time
+from datetime import datetime
 from unittest.mock import AsyncMock
 from types import SimpleNamespace
 
@@ -504,6 +505,7 @@ def test_unauthorized_message_injection_is_rejected() -> None:
         to_user="bob",
         content="injected",
         event={
+            "event_id": "event-injection",
             "event_type": "message",
             "protocol_version": "1",
             "origin_server": "attacker.example",
