@@ -161,9 +161,14 @@ async def complete_delivery_job(job_id: str, worker_id: str) -> None:
         await db.commit()
 
 
-async def fail_delivery_job(job: FederationDeliveryJob, worker_id: str, error: Exception) -> None:
-    factory = get_session_factory()
-    async with factory() as db:
+async def fail_delivery_job(
+    job: FederationDeliveryJob,
+    worker_id: str,
+    error: Exception,
+    db=None,
+) -> None:
+    """Record a failed delivery using an existing or newly created session."""
+    if db is not None:
         current = await db.execute(
             select(FederationDeliveryJob).where(
                 FederationDeliveryJob.id == job.id,
@@ -189,6 +194,11 @@ async def fail_delivery_job(job: FederationDeliveryJob, worker_id: str, error: E
             row.worker_id = None
             row.last_error = message
         await db.commit()
+        return
+
+    factory = get_session_factory()
+    async with factory() as session:
+        await fail_delivery_job(job, worker_id, error, db=session)
 
 
 async def process_delivery_job(job: FederationDeliveryJob) -> None:
