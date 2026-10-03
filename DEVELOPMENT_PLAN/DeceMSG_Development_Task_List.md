@@ -472,7 +472,7 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 ## TASK-018 — Implement E2EE Group Messaging
 
 **Priority:** P1/P2  
-**Status:** In Progress  
+**Status:** Done  
 **Dependencies:** TASK-016, TASK-017
 
 ### Acceptance Criteria
@@ -489,7 +489,7 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 
 # Phase 6 — Federation Event Protocol and Reliability
 
-### TASK-018 Current Work
+### TASK-018 Completion Notes
 
 - Browser group encryption now establishes sessions for every authorized local group member.
 - Server key discovery is scoped to chat membership, and to-device delivery is scoped to active devices.
@@ -497,14 +497,14 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 - The E2EE smoke suite covers multiple authorized devices and exclusion of a removed device after rotation.
 - Added security regression coverage for offline to-device retry-until-ack behavior.
 - Replay/duplicate handling is now covered by the signed federation event/replay work in TASK-019/TASK-020.
-- Final completion remains gated on CI verification.
+- Final verification: **CI run #216** — Python/static checks, security regression suite, and browser crypto build all passed.
 
 ---
 
 ## TASK-019 — Define Signed Federation Event Envelope
 
 **Priority:** P2  
-**Status:** In Progress  
+**Status:** Done  
 **Dependencies:** TASK-005, TASK-011, TASK-016
 
 ### Acceptance Criteria
@@ -519,20 +519,20 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 
 ---
 
-### TASK-019 Current Work
+### TASK-019 Completion Notes
 
 - Added the versioned signed event envelope and deterministic canonical serialization.
 - Federation message ingress now requires an event envelope and verifies the event signature against the authenticated origin server key.
 - Federation message egress signs the ciphertext event and uses authenticated server transport.
 - Added tamper-rejection and canonicalization security regression tests.
-- Replay, duplicate, and durable idempotency behavior is intentionally deferred to TASK-020.
+- Replay, duplicate, and durable idempotency behavior is implemented in TASK-020.
 
 ---
 
 ## TASK-020 — Implement Replay Protection and Idempotency
 
 **Priority:** P2  
-**Status:** Planned  
+**Status:** Done  
 **Dependencies:** TASK-019
 
 ### Acceptance Criteria
@@ -550,7 +550,7 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 ## TASK-021 — Replace File-Based Federation Queues with Durable Queues
 
 **Priority:** P2  
-**Status:** In Progress  
+**Status:** Done  
 **Dependencies:** TASK-020
 
 ### Acceptance Criteria
@@ -563,14 +563,14 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 - [ ] Duplicate delivery remains idempotent.
 - [ ] Dead-letter handling exists for permanently failing events.
 
-### TASK-021 Current Work
+### TASK-021 Completion Notes
 
 - Added durable SQL-backed federation delivery jobs with idempotency keys.
 - Added transactional outbox insertion so a local message and its federation delivery job commit together.
 - Added lease-based worker claiming, bounded retries with backoff, and dead-letter state after maximum attempts.
 - Federation delivery now runs in a restart-safe background worker using the persistent database queue.
 - Added regression tests for idempotent enqueue, retry/backoff, dead-letter transition, and lease expiry.
-- Final completion remains gated on CI verification.
+- Final verification: **CI run #216** — Python/static checks, security regression suite, and browser crypto build all passed.
 
 ---
 
