@@ -586,7 +586,7 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 ## TASK-022 — Implement Deterministic Message/Event Ordering
 
 **Priority:** P2  
-**Status:** Planned  
+**Status:** In Progress  
 **Dependencies:** TASK-019
 
 ### Acceptance Criteria
@@ -598,6 +598,15 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 - [ ] Federation sequence behavior is documented.
 
 ---
+
+### TASK-022 Current Work
+
+- Added deterministic `(created_at, id)` ordering for message retrieval.
+- Added opaque composite cursors with `before` and `after` pagination.
+- Added pagination continuation headers for both directions.
+- Added regression tests for cursor round-trip, timestamp tie-breaking, forward/backward positions, and malformed cursors.
+- Added `DEVELOPMENT_PLAN/Message_Pagination.md` documenting cursor semantics and federation sequence ordering.
+- Completion remains gated on CI verification.
 
 ## TASK-023 — Replace In-Memory Rate Limiting with Shared Rate Limiting
 
