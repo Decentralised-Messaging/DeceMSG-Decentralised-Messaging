@@ -56,6 +56,7 @@ def test_failed_delivery_retries_with_bounded_backoff() -> None:
             job,
             "worker-1",
             RuntimeError("temporary network failure"),
+            db=db,
         )
     )
 
@@ -86,6 +87,7 @@ def test_exhausted_delivery_moves_to_dead_letter_state() -> None:
             job,
             "worker-1",
             RuntimeError("permanent failure"),
+            db=db,
         )
     )
 
