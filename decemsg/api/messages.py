@@ -1,12 +1,14 @@
 """DeceMSG messages API endpoints."""
 from typing import List, Optional
 from datetime import datetime
+import base64
+import json
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import selectinload
 import aiofiles
 import os
@@ -62,69 +64,93 @@ class MessageResponse(BaseModel):
     reactions: dict = {}
 
 
+def encode_message_cursor(created_at: datetime, message_id: str) -> str:
+    """Encode the stable (created_at, id) pagination position."""
+    payload = json.dumps({"created_at": created_at.isoformat(), "id": message_id}, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def decode_message_cursor(cursor: str) -> tuple[datetime, str]:
+    """Decode a stable pagination cursor."""
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+        created_at = datetime.fromisoformat(payload["created_at"])
+        message_id = payload["id"]
+        if not isinstance(message_id, str) or not message_id:
+            raise ValueError
+        return created_at, message_id
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid message pagination cursor")
+
+
+
 @router.get("/chats/{chat_id}/messages", response_model=List[MessageResponse])
 async def get_messages(
     chat_id: str,
     limit: int = Query(50, ge=1, le=100),
-    before: Optional[str] = Query(None),
+    before: Optional[str] = Query(None, description="Opaque cursor for the page before this position"),
+    after: Optional[str] = Query(None, description="Opaque cursor for the page after this position"),
+    response: Response = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get messages for a chat with pagination.
-    
-    Also marks undelivered messages as read and sends receipts to federated senders.
+    """Get messages with deterministic cursor pagination.
+
+    Ordering is always by (created_at, id), with id breaking timestamp ties.
+    before returns the preceding page; after returns the following page.
     """
-    # Verify user is a member of the chat
+    if before and after:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Use either before or after, not both")
+
     result = await db.execute(
-        select(Chat)
-        .options(selectinload(Chat.members))
-        .where(Chat.id == chat_id)
+        select(Chat).options(selectinload(Chat.members)).where(Chat.id == chat_id)
     )
     chat = result.scalar_one_or_none()
-    
     if not chat:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chat not found"
-        )
-    
-    is_member = any(m.user_id == current_user.id for m in chat.members)
-    if not is_member:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not a member of this chat"
-        )
-    
-    # Build query
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
+
+    if not any(m.user_id == current_user.id for m in chat.members):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this chat")
+
     query = select(Message).options(
         selectinload(Message.reactions),
         selectinload(Message.sender),
-        selectinload(Message.sender_federated_identity)
-    ).where(
-        Message.chat_id == chat_id,
-        Message.is_deleted == False
-    )
-    
+        selectinload(Message.sender_federated_identity),
+    ).where(Message.chat_id == chat_id, Message.is_deleted == False)
+
+    direction = "initial"
     if before:
-        try:
-            before_dt = datetime.fromisoformat(before)
-            query = query.where(Message.created_at < before_dt)
-        except ValueError:
-            pass
-    
-    query = query.order_by(Message.created_at.desc()).limit(limit)
-    
+        cursor_created_at, cursor_id = decode_message_cursor(before)
+        direction = "before"
+        query = query.where(
+            or_(
+                Message.created_at < cursor_created_at,
+                and_(Message.created_at == cursor_created_at, Message.id < cursor_id),
+            )
+        ).order_by(Message.created_at.desc(), Message.id.desc()).limit(limit)
+    elif after:
+        cursor_created_at, cursor_id = decode_message_cursor(after)
+        direction = "after"
+        query = query.where(
+            or_(
+                Message.created_at > cursor_created_at,
+                and_(Message.created_at == cursor_created_at, Message.id > cursor_id),
+            )
+        ).order_by(Message.created_at.asc(), Message.id.asc()).limit(limit)
+    else:
+        query = query.order_by(Message.created_at.desc(), Message.id.desc()).limit(limit)
+
     result = await db.execute(query)
-    messages = result.scalars().all()
-    
-    # Reverse to show oldest first
-    messages = list(reversed(messages))
-    
-    # Send delivery/read receipts for federated messages
-    asyncio.create_task(
-        _send_receipts_for_messages(messages, chat_id, current_user.id, db)
-    )
-    
+    messages = list(result.scalars().all())
+    if direction in {"initial", "before"}:
+        messages.reverse()
+
+    if response is not None and messages:
+        response.headers["X-Message-Before"] = encode_message_cursor(messages[0].created_at, messages[0].id)
+        response.headers["X-Message-After"] = encode_message_cursor(messages[-1].created_at, messages[-1].id)
+
+    asyncio.create_task(_send_receipts_for_messages(messages, chat_id, current_user.id, db))
     return [MessageResponse(**msg.to_dict()) for msg in messages]
 
 
