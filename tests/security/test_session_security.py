@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import pytest
 from unittest.mock import AsyncMock
 
-from decemsg.core.auth import create_access_token, get_current_session, validate_login_device
+from decemsg.core.auth import create_access_token, decode_token, get_current_session, validate_login_device
 from decemsg.api.auth import (
     PasswordChangeRequest,
     RecoveryBackupRequest,
@@ -377,3 +377,30 @@ def test_browser_csp_is_configured() -> None:
     assert "Content-Security-Policy" in index_html
     assert "script-src 'self'" in index_html
     assert "object-src 'none'" in index_html
+
+
+@pytest.mark.security
+def test_jwt_decode_requires_fixed_hs256_algorithm_and_expiry() -> None:
+    """JWT verification rejects missing expiry and non-HS256 algorithms."""
+    from datetime import datetime, timedelta
+    import jwt
+
+    config = __import__("decemsg.core.config", fromlist=["get_config"]).get_config()
+    expired_claims = {"sub": "user-1", "sid": "session-1"}
+    no_exp_token = jwt.encode(expired_claims, config.auth.jwt_secret, algorithm="HS256")
+    with pytest.raises(Exception) as missing_exp:
+        decode_token(no_exp_token)
+    assert getattr(missing_exp.value, "status_code", None) == 401
+
+    wrong_algorithm_token = jwt.encode(
+        {
+            "sub": "user-1",
+            "sid": "session-1",
+            "exp": datetime.utcnow() + timedelta(minutes=5),
+        },
+        config.auth.jwt_secret,
+        algorithm="HS384",
+    )
+    with pytest.raises(Exception) as wrong_algorithm:
+        decode_token(wrong_algorithm_token)
+    assert getattr(wrong_algorithm.value, "status_code", None) == 401
