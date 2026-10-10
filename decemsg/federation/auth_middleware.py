@@ -22,6 +22,7 @@ from decemsg.federation.server_auth import (
     get_key_manager
 )
 from decemsg.core.config import get_config
+from decemsg.core.rate_limiter import get_sensitive_rate_limit_response
 
 
 @dataclass
@@ -57,9 +58,14 @@ class FederationAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         """Process the request with authentication check."""
         path = request.url.path
-        
-        # Check if this is a federation path
-        if not path.startswith("/federation/"):
+
+        # Apply the shared per-IP limit before checking federation signatures,
+        # including to invalid and unauthenticated requests and public discovery.
+        if path.startswith("/federation/"):
+            limited_response = get_sensitive_rate_limit_response(request)
+            if limited_response is not None:
+                return limited_response
+        else:
             return await call_next(request)
         
         # Only explicit public protocol metadata/discovery routes bypass auth.

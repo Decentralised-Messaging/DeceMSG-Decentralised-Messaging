@@ -19,6 +19,18 @@ jobs:
     name: Test and static checks (Python 3.11)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      redis:
+        image: redis:8.8.2
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DECEMSG_TEST_REDIS_URL: redis://localhost:6379/15
 
     steps:
       - name: Checkout
@@ -55,6 +67,18 @@ jobs:
     name: Security regression test suite
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      redis:
+        image: redis:8.8.2
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DECEMSG_TEST_REDIS_URL: redis://localhost:6379/15
 
     steps:
       - name: Checkout
