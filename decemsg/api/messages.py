@@ -92,7 +92,7 @@ async def get_messages(
     limit: int = Query(50, ge=1, le=100),
     before: Optional[str] = Query(None, description="Opaque cursor for the page before this position"),
     after: Optional[str] = Query(None, description="Opaque cursor for the page after this position"),
-    response: Response,
+    response: Response = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
