@@ -612,7 +612,7 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 ## TASK-023 — Replace In-Memory Rate Limiting with Shared Rate Limiting
 
 **Priority:** P2  
-**Status:** In Progress  
+**Status:** Done  
 **Dependencies:** TASK-003
 
 ### Acceptance Criteria
