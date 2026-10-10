@@ -58,6 +58,10 @@ class RateLimitConfig(BaseModel):
     login_rate: str = "5/minute"
     api_rate: str = "100/minute"
     burst_size: int = 10
+    auth_rate: str = "30/minute"
+    federation_rate: str = "600/minute"
+    # Shared storage is required across workers; use memory:// only for local tests.
+    storage_uri: str = "redis://localhost:6379/1"
 
 
 class AppConfig(BaseSettings):

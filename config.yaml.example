@@ -33,3 +33,13 @@ messaging:
 federation:
   enabled: true
   discovery_mode: "dns"  # dns or registry
+
+
+rate_limit:
+  enabled: true
+  login_rate: "5/minute"
+  api_rate: "100/minute"
+  auth_rate: "30/minute"
+  federation_rate: "600/minute"
+  burst_size: 10
+  storage_uri: "redis://localhost:6379/1"  # Shared counter storage across workers; use memory:// for local tests only

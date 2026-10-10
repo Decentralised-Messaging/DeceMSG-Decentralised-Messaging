@@ -27,7 +27,8 @@ python-dotenv==1.2.4
 
 # Rate Limiting
 slowapi==0.1.9
-limits==3.13.0
+limits[redis]==5.8.0
+redis==7.4.1
 
 # MCP (Model Context Protocol) - For AI Agent Integration
 mcp==2.2.0

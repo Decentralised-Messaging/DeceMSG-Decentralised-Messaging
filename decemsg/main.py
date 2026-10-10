@@ -14,7 +14,11 @@ from slowapi.errors import RateLimitExceeded
 
 from decemsg.core.database import init_db, close_db
 from decemsg.core.config import get_config
-from decemsg.core.rate_limiter import limiter, rate_limit_exceeded_handler
+from decemsg.core.rate_limiter import (
+    limiter,
+    rate_limit_exceeded_handler,
+    get_sensitive_rate_limit_response,
+)
 from decemsg.api import (
     auth_router,
     users_router,
@@ -75,7 +79,13 @@ def create_app() -> FastAPI:
     
     @app.middleware("http")
     async def security_headers(request, call_next):
-        response = await call_next(request)
+        # Rate-limit all account lifecycle routes, not just login/register
+        # decorators. Federation routes are checked by FederationAuthMiddleware
+        # before it rejects missing/invalid signatures.
+        limited_response = None
+        if request.url.path.startswith("/api/auth/"):
+            limited_response = get_sensitive_rate_limit_response(request)
+        response = limited_response or await call_next(request)
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self'; style-src 'self'; "

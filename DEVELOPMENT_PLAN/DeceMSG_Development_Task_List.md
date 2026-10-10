@@ -617,11 +617,11 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 
 ### Acceptance Criteria
 
-- [x] Rate-limit state is shared across application workers.
-- [x] Limits survive normal worker distribution.
-- [ ] Federation and authentication endpoints have explicit limits.
-- [ ] Rate-limit responses are consistent.
-- [x] Tests demonstrate limits across multiple workers/processes.
+- [ ] Rate-limit state is shared across application workers.
+- [ ] Limits survive normal worker distribution.
+- [x] Federation and authentication endpoints have explicit limits.
+- [x] Rate-limit responses are consistent.
+- [ ] Tests demonstrate limits across multiple workers/processes.
 
 ---
 
@@ -629,11 +629,14 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 
 ### TASK-023 Current Work
 
-- Implemented a configurable Redis storage URI with a Redis-capable `limits` backend; local `memory://` remains available only for tests.
-- Final verification: **CI run #234** — Python compile, Ruff, unit/integration tests, dependency audit, security regression suite, and browser crypto build all passed. Test result: 72 passed, 8 skipped. The Redis integration test proved counters are shared across two independent limiter instances.
-- PR #4 contains the implementation and CI is green. The PR remains open pending merge; one review finding about the initial Redis pin was fixed and its review thread resolved.
-- Remaining acceptance work: confirm explicit login/federation limit policy and consistency of rate-limit response metadata before closing TASK-023.
-
+- Replaced the process-local `memory://` default with configurable Redis-backed storage shared by all workers.
+- Pinned `limits[redis]==5.8.0` with compatible `redis==7.4.1` after CI caught an upstream dependency constraint.
+- Added shared per-IP `auth_rate` and `federation_rate` policies before sensitive handlers; invalid and unauthenticated federation requests consume the rate budget before signature rejection.
+- Unified 429 response payloads and rate-limit headers; sensitive route families fail closed with HTTP 503 when shared storage is unavailable.
+- Added CI Redis services and tests for cross-instance storage, explicit auth/federation route policies, consistent 429s, disabled policy, and rate limiting before federation authentication.
+- Documented Redis deployment, loopback local setup, shared URI requirements, per-family limits, fail-closed behavior, and `rediss://` guidance.
+- Earlier shared-storage verification: **CI #234** passed (72 passed, 8 skipped), including dependency audit and browser crypto build. Expanded route-policy verification is pending a fresh CI run.
+- PR #4 remains open; the initial dependency finding was corrected and its review thread resolved.
 ## TASK-024 — Harden File Upload Pipeline
 
 **Priority:** P0/P2  

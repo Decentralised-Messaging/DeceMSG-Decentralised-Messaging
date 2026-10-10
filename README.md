@@ -74,7 +74,15 @@ DeceMSG is an open-source, self-hostable messaging platform that enables:
 
 ### Prerequisites
 - Python 3.11 or higher
-- SQLite (included) or PostgreSQL/MySQL
+- Redis for shared rate-limit counters (recommended/default); SQLite (included) or PostgreSQL/MySQL
+
+For local development, start Redis bound to loopback (keep it private):
+
+```bash
+docker run --rm --name decemsg-redis -p 127.0.0.1:6379:6379 redis:8.8.2
+```
+
+Production deployments should use an authenticated Redis service with ACLs and TLS when traffic crosses an untrusted network. Configure the same storage URI in every DeceMSG worker.
 
 ### Installation
 
@@ -101,7 +109,7 @@ Default admin credentials:
 
 ## Configuration
 
-Edit `config.yaml` to customize your server:
+Edit `config.yaml` to customize your server. Rate limits use the configured shared storage URI; use the same Redis endpoint/database for every application worker. The default is `redis://localhost:6379/1`. For isolated local tests only, `memory://` can be used, but its counters are process-local and are not appropriate for multi-worker or production deployments.
 
 ```yaml
 server:
@@ -130,9 +138,12 @@ messaging:
 
 rate_limit:
   enabled: true
-  login_rate: "5/minute"    # Max login attempts per minute
-  api_rate: "100/minute"    # Max API calls per minute
+  login_rate: "5/minute"        # Login/register attempts per IP
+  api_rate: "100/minute"        # Decorated API endpoints
+  auth_rate: "30/minute"        # All /api/auth/* routes per IP
+  federation_rate: "600/minute" # All /federation/* routes per IP
   burst_size: 10
+  storage_uri: "redis://localhost:6379/1"  # Shared across application workers
 
 federation:
   enabled: true
