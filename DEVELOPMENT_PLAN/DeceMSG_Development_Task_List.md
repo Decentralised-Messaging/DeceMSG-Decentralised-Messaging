@@ -617,11 +617,11 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 
 ### Acceptance Criteria
 
-- [ ] Rate-limit state is shared across application workers.
-- [ ] Limits survive normal worker distribution.
+- [x] Rate-limit state is shared across application workers.
+- [x] Limits survive normal worker distribution.
 - [ ] Federation and authentication endpoints have explicit limits.
 - [ ] Rate-limit responses are consistent.
-- [ ] Tests demonstrate limits across multiple workers/processes.
+- [x] Tests demonstrate limits across multiple workers/processes.
 
 ---
 
@@ -630,7 +630,8 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 ### TASK-023 Current Work
 
 - Inspecting the current rate-limit configuration and SlowAPI/limits storage options before choosing a shared backend.
-- Completion remains gated on explicit cross-worker/shared-state tests and CI verification.
+- Final verification: **CI run #234** — Python compile, Ruff, unit/integration tests, dependency audit, security regression suite, and browser crypto build all passed. Test result: 72 passed, 8 skipped. The Redis integration test proved counters are shared across two independent limiter instances.
+- PR #4 is open and CI-green; merge/review is still outstanding.
 
 ## TASK-024 — Harden File Upload Pipeline
 
