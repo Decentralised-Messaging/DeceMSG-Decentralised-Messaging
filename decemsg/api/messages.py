@@ -3,7 +3,6 @@ from typing import List, Optional
 from datetime import datetime
 import asyncio
 import hashlib
-import re
 import tempfile
 import stat
 import base64
@@ -454,6 +453,8 @@ def normalize_upload_filename(filename: str | None) -> tuple[str, str]:
     """Return a display-only basename and its normalized allowed extension."""
     if not filename:
         raise HTTPException(status_code=400, detail="A filename is required")
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in filename):
+        raise HTTPException(status_code=400, detail="Invalid filename")
 
     # Treat Windows and POSIX separators as paths. Never use the raw value
     # when creating a stored path.
