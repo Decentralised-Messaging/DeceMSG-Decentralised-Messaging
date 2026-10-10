@@ -617,11 +617,11 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 
 ### Acceptance Criteria
 
-- [ ] Rate-limit state is shared across application workers.
-- [ ] Limits survive normal worker distribution.
+- [x] Rate-limit state is shared across application workers.
+- [x] Limits survive normal worker distribution.
 - [x] Federation and authentication endpoints have explicit limits.
 - [x] Rate-limit responses are consistent.
-- [ ] Tests demonstrate limits across multiple workers/processes.
+- [x] Tests demonstrate limits across multiple workers/processes.
 
 ---
 
@@ -635,8 +635,8 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 - Unified 429 response payloads and rate-limit headers; sensitive route families fail closed with HTTP 503 when shared storage is unavailable.
 - Added CI Redis services and tests for cross-instance storage, explicit auth/federation route policies, consistent 429s, disabled policy, and rate limiting before federation authentication.
 - Documented Redis deployment, loopback local setup, shared URI requirements, per-family limits, fail-closed behavior, and `rediss://` guidance.
-- Earlier shared-storage verification: **CI #234** passed (72 passed, 8 skipped), including dependency audit and browser crypto build. Expanded route-policy verification is pending a fresh CI run.
-- PR #4 remains open; the initial dependency finding was corrected and its review thread resolved.
+- Earlier shared-storage verification: **CI #234** passed (72 passed, 8 skipped), including dependency audit and browser crypto build. Expanded route-policy verification: **CI #237** passed all three jobs on commit `9c810ded7d96a5f10e47d86400b44a5279cb02af`.
+- PR #4 is CI-green and the initial Redis client version review thread is resolved. Status remains In Progress until merge and a final main-branch CI run.
 ## TASK-024 — Harden File Upload Pipeline
 
 **Priority:** P0/P2  
