@@ -5,7 +5,8 @@ from typing import Optional
 from fastapi import Depends, HTTPException, status, WebSocket
 from fastapi.security import OAuth2PasswordBearer
 import bcrypt
-from jose import JWTError, jwt
+import jwt
+from jwt import InvalidTokenError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -49,9 +50,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(
-        to_encode, 
-        config.auth.jwt_secret, 
-        algorithm="HS256"
+        to_encode,
+        config.auth.jwt_secret,
+        algorithm="HS256",
     )
     return encoded_jwt
 
@@ -61,12 +62,13 @@ def decode_token(token: str) -> dict:
     config = get_config()
     try:
         payload = jwt.decode(
-            token, 
-            config.auth.jwt_secret, 
-            algorithms=["HS256"]
+            token,
+            config.auth.jwt_secret,
+            algorithms=["HS256"],
+            options={"require": ["exp"]},
         )
         return payload
-    except JWTError:
+    except InvalidTokenError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
