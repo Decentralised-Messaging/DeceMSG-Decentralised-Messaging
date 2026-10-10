@@ -586,16 +586,16 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 ## TASK-022 — Implement Deterministic Message/Event Ordering
 
 **Priority:** P2  
-**Status:** In Progress  
+**Status:** Done  
 **Dependencies:** TASK-019
 
 ### Acceptance Criteria
 
-- [ ] Message pagination has deterministic ordering.
-- [ ] Ties on created_at cannot reorder messages unpredictably.
-- [ ] Cursor semantics are documented.
-- [ ] Forward/backward pagination tests pass.
-- [ ] Federation sequence behavior is documented.
+- [x] Message pagination has deterministic ordering.
+- [x] Ties on created_at cannot reorder messages unpredictably.
+- [x] Cursor semantics are documented.
+- [x] Forward/backward pagination tests pass.
+- [x] Federation sequence behavior is documented.
 
 ---
 
@@ -606,7 +606,8 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 - Added pagination continuation headers for both directions.
 - Added regression tests for cursor round-trip, timestamp tie-breaking, forward/backward positions, and malformed cursors.
 - Added `DEVELOPMENT_PLAN/Message_Pagination.md` documenting cursor semantics and federation sequence ordering.
-- Completion remains gated on CI verification.
+- JWT dependency audit identified critical `python-jose` and then outdated `PyJWT 2.10.1` advisories; migrated the application to `PyJWT[crypto]==2.15.1`, fixed HS256 algorithm and expiry allowlisting, and added JWT security regression tests.
+- Final verification: **CI run #230** — Python compile, Ruff, 68+ pytest tests, dependency audit, security regression suite, and browser crypto build all passed.
 
 ## TASK-023 — Replace In-Memory Rate Limiting with Shared Rate Limiting
 
