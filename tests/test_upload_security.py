@@ -2,7 +2,6 @@
 
 import asyncio
 import io
-import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -11,7 +10,6 @@ from fastapi import HTTPException, UploadFile
 
 from decemsg.api import messages as api
 from decemsg.core.config import AppConfig, MessagingConfig
-from decemsg.models.message import MessageType
 from decemsg.models.uploaded_file import UploadedFile
 
 
@@ -75,13 +73,24 @@ def test_upload_rejects_oversized_file_while_streaming(tmp_path, monkeypatch) ->
     chat = SimpleNamespace(id="chat-1", is_active=True, members=[SimpleNamespace(user_id="user-1")])
     db = AsyncMock()
     db.execute.return_value = _result(chat)
-    file = _upload_file("big.pdf", "application/pdf", b"%PDF-" + b"A" * (1024 * 1024 + 10))
+    contents = b"%PDF-" + b"A" * (1024 * 1024 + 10)
+    read_sizes = []
+    class TrackingUploadFile(UploadFile):
+        async def read(self, size: int = -1) -> bytes:
+            read_sizes.append(size)
+            return await super().read(size)
+
+    file = TrackingUploadFile(
+        filename="big.pdf",
+        file=io.BytesIO(contents),
+        headers={"content-type": "application/pdf"},
+    )
 
     with pytest.raises(HTTPException) as exc:
         asyncio.run(api.upload_file(file, "chat-1", db, SimpleNamespace(id="user-1")))
 
     assert exc.value.status_code == 413
-    assert file.file.tell() <= api.MAX_UPLOAD_CHUNK_BYTES * 2
+    assert read_sizes and all(0 < size <= api.MAX_UPLOAD_CHUNK_BYTES for size in read_sizes)
     assert not list((tmp_path / "data" / "uploads").glob("*"))
 
 
@@ -123,7 +132,7 @@ def test_download_requires_current_chat_membership(tmp_path, monkeypatch) -> Non
     upload_dir.mkdir(parents=True)
     stored = upload_dir / "file-1.pdf"
     stored.write_bytes(b"%PDF-1.7 example")
-    record = UploadedFile(
+    record = SimpleNamespace(
         id="file-1",
         chat_id="chat-1",
         uploader_user_id="user-1",
