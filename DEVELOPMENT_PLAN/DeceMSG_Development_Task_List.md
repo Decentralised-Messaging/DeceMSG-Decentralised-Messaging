@@ -629,9 +629,10 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 
 ### TASK-023 Current Work
 
-- Inspecting the current rate-limit configuration and SlowAPI/limits storage options before choosing a shared backend.
+- Implemented a configurable Redis storage URI with a Redis-capable `limits` backend; local `memory://` remains available only for tests.
 - Final verification: **CI run #234** — Python compile, Ruff, unit/integration tests, dependency audit, security regression suite, and browser crypto build all passed. Test result: 72 passed, 8 skipped. The Redis integration test proved counters are shared across two independent limiter instances.
-- PR #4 is open and CI-green; merge/review is still outstanding.
+- PR #4 contains the implementation and CI is green. The PR remains open pending merge; one review finding about the initial Redis pin was fixed and its review thread resolved.
+- Remaining acceptance work: confirm explicit login/federation limit policy and consistency of rate-limit response metadata before closing TASK-023.
 
 ## TASK-024 — Harden File Upload Pipeline
 
