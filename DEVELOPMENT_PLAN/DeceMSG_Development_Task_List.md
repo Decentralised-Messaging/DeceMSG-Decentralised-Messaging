@@ -612,7 +612,7 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 ## TASK-023 — Replace In-Memory Rate Limiting with Shared Rate Limiting
 
 **Priority:** P2  
-**Status:** Planned  
+**Status:** In Progress  
 **Dependencies:** TASK-003
 
 ### Acceptance Criteria
@@ -626,6 +626,11 @@ Select a mature, reviewed messaging cryptographic implementation that is compati
 ---
 
 # Phase 7 — Uploads, Presence, and Data Lifecycle
+
+### TASK-023 Current Work
+
+- Inspecting the current rate-limit configuration and SlowAPI/limits storage options before choosing a shared backend.
+- Completion remains gated on explicit cross-worker/shared-state tests and CI verification.
 
 ## TASK-024 — Harden File Upload Pipeline
 
