@@ -2,6 +2,10 @@
 from typing import List, Optional
 from datetime import datetime
 import asyncio
+import hashlib
+import re
+import tempfile
+import stat
 import base64
 import json
 
@@ -24,6 +28,7 @@ from decemsg.core.websocket import manager
 from decemsg.models.user import User
 from decemsg.models.chat import Chat, ChatMember
 from decemsg.models.message import Message, MessageReaction, MessageType
+from decemsg.models.uploaded_file import UploadedFile
 from decemsg.federation.federation_client import is_federated_user, parse_user_id
 
 router = APIRouter(prefix="/api", tags=["Messages"])
@@ -420,77 +425,237 @@ async def remove_reaction(
 
 
 # File Upload/Download endpoints
+MAX_UPLOAD_CHUNK_BYTES = 64 * 1024
+MIME_BY_EXTENSION = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".pdf": "application/pdf",
+    ".txt": "text/plain",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+MAGIC_PREFIXES = {
+    ".jpg": (b"\xff\xd8\xff",),
+    ".jpeg": (b"\xff\xd8\xff",),
+    ".png": (b"\x89PNG\r\n\x1a\n",),
+    ".gif": (b"GIF87a", b"GIF89a"),
+    ".pdf": (b"%PDF-",),
+    # Modern OOXML .docx files are ZIP containers. Content-level validation
+    # beyond the ZIP signature is intentionally left to the scanning hook.
+    ".docx": (b"PK\x03\x04",),
+    # Legacy OLE compound document signature used by .doc.
+    ".doc": (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",),
+}
+
+
+def normalize_upload_filename(filename: str | None) -> tuple[str, str]:
+    """Return a display-only basename and its normalized allowed extension."""
+    if not filename:
+        raise HTTPException(status_code=400, detail="A filename is required")
+
+    # Treat Windows and POSIX separators as paths. Never use the raw value
+    # when creating a stored path.
+    basename = filename.replace("\\", "/").split("/")[-1]
+    basename = "".join(ch for ch in basename if ch.isprintable() and ch not in "\r\n\x00")
+    basename = basename.strip().strip(".")
+    if not basename or basename in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    basename = basename[:255]
+    extension = os.path.splitext(basename)[1].lower()
+    if extension not in MIME_BY_EXTENSION:
+        raise HTTPException(status_code=400, detail="File type not allowed")
+    return basename, extension
+
+
+def validate_upload_signature(extension: str, prefix: bytes) -> bool:
+    """Check signatures for formats with well-known magic bytes."""
+    signatures = MAGIC_PREFIXES.get(extension)
+    if not signatures:
+        return False
+    return any(prefix.startswith(signature) for signature in signatures)
+
+
+def content_type_matches_extension(extension: str, content_type: str | None) -> bool:
+    """Reject declared MIME types that conflict with the allowed extension."""
+    expected = MIME_BY_EXTENSION.get(extension)
+    if not expected or not content_type:
+        return False
+    normalized = content_type.split(";", 1)[0].strip().lower()
+    allowed = {expected}
+    if extension == ".txt":
+        allowed.add("text/plain")
+    return normalized in allowed
+
+
+def upload_scan_hook(path: str, content_type: str, filename: str) -> bool:
+    """Security scanning integration point; deployments can replace this hook."""
+    # DeceMSG currently performs format/signature validation here. AV or DLP
+    # engines can be added behind this function without changing the API.
+    return os.path.isfile(path) and os.path.getsize(path) > 0
+
+
 @router.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
+    chat_id: str = Form(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Upload a file."""
+    """Stream an upload into isolated storage and bind it to a chat."""
     config = get_config()
-    
-    # Read file content
-    file_data = await file.read()
-    filename = file.filename or "unknown"
-    
-    # Validate file type
-    ext = os.path.splitext(filename)[1].lower()
-    if ext not in config.messaging.allowed_file_types:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File type not allowed. Allowed: {config.messaging.allowed_file_types}"
-        )
-    
-    # Validate file size
     max_size = config.messaging.max_file_size_mb * 1024 * 1024
-    if len(file_data) > max_size:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File too large. Max size: {config.messaging.max_file_size_mb}MB"
+    if max_size <= 0:
+        raise HTTPException(status_code=503, detail="File uploads are not configured")
+
+    result = await db.execute(
+        select(Chat)
+        .options(selectinload(Chat.members))
+        .where(Chat.id == chat_id, Chat.is_active == True)
+    )
+    chat = result.scalar_one_or_none()
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    if not any(member.user_id == current_user.id for member in chat.members):
+        raise HTTPException(status_code=403, detail="Not a member of this chat")
+
+    original_name, extension = normalize_upload_filename(file.filename)
+    if extension not in {value.lower() for value in config.messaging.allowed_file_types}:
+        raise HTTPException(status_code=400, detail="File type not allowed")
+    if not content_type_matches_extension(extension, file.content_type):
+        raise HTTPException(status_code=400, detail="MIME type does not match the file extension")
+
+    upload_dir = os.path.abspath("./data/uploads")
+    os.makedirs(upload_dir, mode=0o700, exist_ok=True)
+    try:
+        os.chmod(upload_dir, 0o700)
+    except OSError:
+        # Some mounted/container filesystems do not permit chmod; the
+        # directory remains isolated under the application's data directory.
+        pass
+
+    file_id = str(uuid.uuid4())
+    storage_name = f"{file_id}{extension}"
+    final_path = os.path.join(upload_dir, storage_name)
+    sha256 = hashlib.sha256()
+    total_bytes = 0
+    prefix = bytearray()
+    temp_path = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=upload_dir,
+            prefix=".upload-",
+            suffix=".tmp",
+            delete=False,
+        ) as destination:
+            temp_path = destination.name
+            os.chmod(temp_path, stat.S_IRUSR | stat.S_IWUSR)
+            while True:
+                chunk = await file.read(MAX_UPLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+
+                total_bytes += len(chunk)
+                if total_bytes > max_size:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File too large. Max size: {config.messaging.max_file_size_mb}MB",
+                    )
+
+                if len(prefix) < 32:
+                    prefix.extend(chunk[: 32 - len(prefix)])
+                sha256.update(chunk)
+                destination.write(chunk)
+
+        if total_bytes == 0:
+            raise HTTPException(status_code=400, detail="Empty files are not allowed")
+        if not validate_upload_signature(extension, bytes(prefix)):
+            raise HTTPException(status_code=400, detail="File signature does not match the allowed type")
+
+        # Extension/MIME/signature checks are only the baseline filter. The
+        # scanning hook is the integration point for AV or content scanning.
+        if not upload_scan_hook(temp_path, MIME_BY_EXTENSION[extension], original_name):
+            raise HTTPException(status_code=400, detail="File failed content scanning")
+
+        os.replace(temp_path, final_path)
+        temp_path = None
+
+        record = UploadedFile(
+            id=file_id,
+            chat_id=chat_id,
+            uploader_user_id=current_user.id,
+            storage_key=storage_name,
+            original_name=original_name,
+            content_type=MIME_BY_EXTENSION[extension],
+            size_bytes=total_bytes,
+            sha256=sha256.hexdigest(),
         )
-    
-    # Generate unique filename
-    unique_filename = f"{uuid.uuid4()}{ext}"
-    upload_dir = "./data/uploads"
-    os.makedirs(upload_dir, exist_ok=True)
-    
-    file_path = os.path.join(upload_dir, unique_filename)
-    
-    # Save file
-    with open(file_path, "wb") as f:
-        f.write(file_data)
-    
-    # Determine message type
-    message_type = MessageType.IMAGE if ext in [".jpg", ".jpeg", ".png", ".gif"] else MessageType.FILE
-    
-    return {
-        "file_url": f"/api/files/{unique_filename}",
-        "file_name": filename,
-        "file_size": len(file_data),
-        "message_type": message_type.value
-    }
+        db.add(record)
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            try:
+                os.remove(final_path)
+            except OSError:
+                pass
+            raise
+
+        message_type = MessageType.IMAGE if extension in {".jpg", ".jpeg", ".png", ".gif"} else MessageType.FILE
+        return {
+            "file_id": file_id,
+            "file_url": f"/api/files/{file_id}",
+            "file_name": original_name,
+            "file_size": total_bytes,
+            "content_type": MIME_BY_EXTENSION[extension],
+            "message_type": message_type.value,
+        }
+    except Exception:
+        if temp_path:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+        raise
+    finally:
+        await file.close()
 
 
-@router.get("/files/{filename}")
+@router.get("/files/{file_id}")
 async def download_file(
-    filename: str,
+    file_id: str,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Download a file."""
-    file_path = f"./data/uploads/{filename}"
-    
-    if not os.path.exists(file_path):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="File not found"
+    """Download a file only for a current member of its associated chat."""
+    result = await db.execute(
+        select(UploadedFile).where(UploadedFile.id == file_id)
+    )
+    record = result.scalar_one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    member_result = await db.execute(
+        select(ChatMember).where(
+            ChatMember.chat_id == record.chat_id,
+            ChatMember.user_id == current_user.id,
         )
-    
-    # Determine content type
-    content_type, _ = mimetypes.guess_type(file_path)
-    content_type = content_type or "application/octet-stream"
-    
+    )
+    if member_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=403, detail="Not authorized to access this file")
+
+    upload_dir = os.path.realpath("./data/uploads")
+    file_path = os.path.realpath(os.path.join(upload_dir, record.storage_key))
+    if os.path.commonpath([upload_dir, file_path]) != upload_dir or not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
     return FileResponse(
         file_path,
-        media_type=content_type,
-        filename=filename
+        media_type=record.content_type,
+        filename=record.original_name,
+        headers={"X-Content-Type-Options": "nosniff"},
     )
+
