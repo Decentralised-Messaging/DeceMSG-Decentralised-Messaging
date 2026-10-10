@@ -63,7 +63,7 @@ Create a reproducible engineering/security baseline before modifying core archit
 - Latest verified CI run: **#20** — both test/static-check and security-regression jobs passed.
 - Pytest baseline: 7 passed in the security suite; the maintained test suite passes.
 - Legacy application Ruff debt is intentionally tracked separately; the CI lint gate currently targets the maintained test suite rather than masking the pre-existing application findings.
-- Dependency audit passes with one explicit, documented ignore for `PYSEC-2026-1325` (ecdsa), for which the scanner reports no fixed version.
+- Dependency audit currently documents the existing `PYSEC-2026-1325` ecdsa advisory without a known fixed version. CI also caught a newer critical `python-jose` advisory, so JWT handling was migrated to PyJWT with a strict HS256 allowlist and required expiry; the PyJWT pin was updated to patched `2.15.1` after the initial `2.10.1` pin was itself flagged. The updated audit is pending CI verification.
 
 ## TASK-002 — Build Security Regression Test Harness
 
